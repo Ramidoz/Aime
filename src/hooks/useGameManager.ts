@@ -1,238 +1,155 @@
 "use client";
 
-import { useState, useCallback, useMemo, useRef } from "react";
+import { useState, useCallback, useRef } from "react";
+import { CanvasState, Genre, GameObjective } from "@/types";
+import { ELEMENT_REGISTRY } from "@/game/registry";
+import { PlacedElement, LevelLayout } from "@/game/levelDesigner";
+import { interpretCanvasState } from "@/game/interpreter";
 import {
-  CanvasState,
-  Genre,
-  GameObject,
-  GameObjective,
-  ObjectiveType,
-} from "@/types";
-
-const COLLECTION_RADIUS = 1.2; // How close player must be to collect
-
-// Map genre to primary objective type
-function getObjectiveType(genre: Genre): ObjectiveType {
-  switch (genre) {
-    case "Racing":
-      return "racing";
-    case "Pets":
-      return "interact";
-    default:
-      return "collect";
-  }
-}
-
-// Convert canvas_state items into gameplay objects placed around the world
-function buildGameObjects(
-  canvasState: CanvasState,
-  genre: Genre
-): GameObject[] {
-  const objects: GameObject[] = [];
-  const objectiveType = getObjectiveType(genre);
-  let id = 0;
-
-  // Place world items as environment/paths
-  canvasState.world.forEach((label, i) => {
-    const angle = (i / Math.max(canvasState.world.length, 1)) * Math.PI * 2;
-    const radius = 4 + i * 1.5;
-    const x = Math.cos(angle) * radius;
-    const z = Math.sin(angle) * radius;
-
-    // Some world items become boosts (anything with speed-like words)
-    const isBoost =
-      /fast|speed|turbo|boost|rocket|nitro|wind/i.test(label);
-
-    objects.push({
-      id: `go-${id++}`,
-      type: isBoost ? "boost" : "obstacle",
-      position: [x, 0.4, z],
-      label,
-      collected: false,
-    });
-  });
-
-  // Place characters as interactables or obstacles
-  canvasState.characters.forEach((label, i) => {
-    const angle =
-      (i / Math.max(canvasState.characters.length, 1)) * Math.PI * 2 +
-      Math.PI / 6;
-    const radius = 3 + i * 2;
-    const x = Math.cos(angle) * radius;
-    const z = Math.sin(angle) * radius;
-
-    objects.push({
-      id: `go-${id++}`,
-      type: objectiveType === "interact" ? "interactable" : "obstacle",
-      position: [x, 0.4, z],
-      label,
-      collected: false,
-    });
-  });
-
-  // Place theme items as collectibles or checkpoints
-  canvasState.theme.forEach((label, i) => {
-    const angle =
-      (i / Math.max(canvasState.theme.length, 1)) * Math.PI * 2 +
-      Math.PI / 3;
-    const radius = 5 + i * 1.8;
-    const x = Math.cos(angle) * radius;
-    const z = Math.sin(angle) * radius;
-
-    objects.push({
-      id: `go-${id++}`,
-      type: objectiveType === "racing" ? "checkpoint" : "collectible",
-      position: [x, 0.4, z],
-      label,
-      collected: false,
-    });
-  });
-
-  // Ensure we always have enough objective items (minimum 3)
-  const objItems = objects.filter(
-    (o) =>
-      o.type === "collectible" ||
-      o.type === "checkpoint" ||
-      o.type === "interactable"
-  );
-
-  if (objItems.length < 3) {
-    // Add extra collectibles/checkpoints spread around
-    const needed = 3 - objItems.length;
-    for (let i = 0; i < needed; i++) {
-      const angle = ((objItems.length + i) / 5) * Math.PI * 2 + Math.PI / 2;
-      const radius = 6 + i * 2;
-      objects.push({
-        id: `go-${id++}`,
-        type: objectiveType === "racing" ? "checkpoint" : objectiveType === "interact" ? "interactable" : "collectible",
-        position: [Math.cos(angle) * radius, 0.4, Math.sin(angle) * radius],
-        label: objectiveType === "racing" ? `Gate ${i + 1}` : objectiveType === "interact" ? `Friend ${i + 1}` : `Star ${i + 1}`,
-        collected: false,
-      });
-    }
-  }
-
-  // Always add a couple of boost zones
-  const boostCount = objects.filter((o) => o.type === "boost").length;
-  if (boostCount < 2) {
-    for (let i = 0; i < 2 - boostCount; i++) {
-      const angle = Math.PI * (0.8 + i * 1.2);
-      const radius = 7 + i * 3;
-      objects.push({
-        id: `go-${id++}`,
-        type: "boost",
-        position: [Math.cos(angle) * radius, 0.3, Math.sin(angle) * radius],
-        label: "Speed Boost",
-        collected: false,
-      });
-    }
-  }
-
-  return objects;
-}
-
-function buildObjective(
-  genre: Genre,
-  objects: GameObject[]
-): GameObjective {
-  const type = getObjectiveType(genre);
-  const targetTypes =
-    type === "racing"
-      ? ["checkpoint"]
-      : type === "interact"
-        ? ["interactable"]
-        : ["collectible"];
-
-  const total = objects.filter((o) => targetTypes.includes(o.type)).length;
-
-  const labels: Record<ObjectiveType, string> = {
-    racing: "Pass all checkpoints",
-    collect: "Collect all items",
-    interact: "Meet all friends",
-  };
-
-  return {
-    type,
-    label: labels[type],
-    total,
-    current: 0,
-  };
-}
+  playSoundEffect,
+  triggerScreenShake,
+  createScorePopup,
+  ScorePopup,
+} from "@/game/feedback";
 
 export function useGameManager(canvasState: CanvasState, genre: Genre) {
-  const [gameObjects, setGameObjects] = useState<GameObject[]>([]);
+  const [layout, setLayout] = useState<LevelLayout | null>(null);
+  const [elements, setElements] = useState<PlacedElement[]>([]);
   const [objective, setObjective] = useState<GameObjective>({
     type: "collect",
     label: "Collect all items",
     total: 0,
     current: 0,
   });
+  const [score, setScore] = useState(0);
   const [boosted, setBoosted] = useState(false);
   const [gameWon, setGameWon] = useState(false);
+  const [scorePopups, setScorePopups] = useState<ScorePopup[]>([]);
+  const [collectEffects, setCollectEffects] = useState<
+    { id: number; position: [number, number, number]; color: string }[]
+  >([]);
   const boostTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const goalReadyRef = useRef(false);
 
-  // Initialize game from canvas state
   const initGame = useCallback(() => {
-    const objects = buildGameObjects(canvasState, genre);
-    const obj = buildObjective(genre, objects);
-    setGameObjects(objects);
-    setObjective(obj);
+    const levelLayout = interpretCanvasState(canvasState, genre);
+    setLayout(levelLayout);
+    setElements(levelLayout.elements);
+    setScore(0);
     setBoosted(false);
     setGameWon(false);
+    setScorePopups([]);
+    setCollectEffects([]);
+    goalReadyRef.current = false;
+
+    // Count objectives
+    const objectiveEls = levelLayout.elements.filter(
+      (e) => ELEMENT_REGISTRY[e.type].isObjective
+    );
+
+    const hasNpcs = objectiveEls.some((e) => e.type === "friendly_npc");
+    const hasCheckpoints = objectiveEls.some((e) => e.type === "checkpoint");
+
+    let label = "Collect everything, then reach the goal!";
+    let type: "collect" | "racing" | "interact" = "collect";
+
+    if (genre === "Pets" || (hasNpcs && !hasCheckpoints)) {
+      label = "Meet all friends, then reach the goal!";
+      type = "interact";
+    } else if (genre === "Racing" || hasCheckpoints) {
+      label = "Pass all checkpoints to the finish!";
+      type = "racing";
+    }
+
+    setObjective({
+      type,
+      label,
+      total: objectiveEls.length,
+      current: 0,
+    });
   }, [canvasState, genre]);
 
-  // Check collision between player position and game objects
+  const removeCollectEffect = useCallback((id: number) => {
+    setCollectEffects((prev) => prev.filter((e) => e.id !== id));
+  }, []);
+
   const checkCollisions = useCallback(
     (playerPos: [number, number, number]) => {
       if (gameWon) return;
 
-      setGameObjects((prev) => {
+      setElements((prev) => {
         let changed = false;
-        const next = prev.map((obj) => {
-          if (obj.collected) return obj;
+        const next = prev.map((el) => {
+          if (el.collected) return el;
 
-          const dx = playerPos[0] - obj.position[0];
-          const dz = playerPos[2] - obj.position[2];
+          const def = ELEMENT_REGISTRY[el.type];
+          const dx = playerPos[0] - el.position[0];
+          const dz = playerPos[2] - el.position[2];
           const dist = Math.sqrt(dx * dx + dz * dz);
 
-          if (dist < COLLECTION_RADIUS) {
-            changed = true;
+          if (dist < def.interactionRadius) {
+            // Goal zone — only activate when all objectives done
+            if (el.type === "goal_zone") {
+              if (!goalReadyRef.current) return el;
+              // Player reached goal!
+              changed = true;
+              playSoundEffect(def.sound);
+              setGameWon(true);
+              setScore((s) => s + def.scoreValue);
+              setScorePopups((p) => [...p, createScorePopup(def.scoreValue)]);
+              setCollectEffects((p) => [
+                ...p,
+                { id: Date.now(), position: el.position, color: def.color },
+              ]);
+              return { ...el, collected: true };
+            }
 
-            if (obj.type === "boost") {
+            changed = true;
+            playSoundEffect(def.sound);
+
+            // Score
+            if (def.scoreValue > 0) {
+              setScore((s) => s + def.scoreValue);
+              setScorePopups((p) => [...p, createScorePopup(def.scoreValue)]);
+            }
+
+            // Particle effect
+            if (def.particle !== "none") {
+              setCollectEffects((p) => [
+                ...p,
+                { id: Date.now() + Math.random(), position: [...el.position] as [number, number, number], color: def.color },
+              ]);
+            }
+
+            // Speed boost
+            if (el.type === "speed_boost") {
               setBoosted(true);
               if (boostTimerRef.current) clearTimeout(boostTimerRef.current);
               boostTimerRef.current = setTimeout(() => setBoosted(false), 3000);
-              return { ...obj, collected: true };
             }
 
-            if (
-              obj.type === "collectible" ||
-              obj.type === "checkpoint" ||
-              obj.type === "interactable"
-            ) {
-              return { ...obj, collected: true };
+            // Screen shake for obstacles
+            if (def.category === "hazard") {
+              triggerScreenShake(3, 150);
+            }
+
+            if (def.consumeOnTouch || def.isObjective) {
+              return { ...el, collected: true };
             }
           }
-          return obj;
+          return el;
         });
 
         if (changed) {
           // Recount objective progress
-          const targetTypes =
-            objective.type === "racing"
-              ? ["checkpoint"]
-              : objective.type === "interact"
-                ? ["interactable"]
-                : ["collectible"];
-
-          const collected = next.filter(
-            (o) => targetTypes.includes(o.type) && o.collected
+          const objectiveCount = next.filter(
+            (e) => ELEMENT_REGISTRY[e.type].isObjective && e.collected
           ).length;
 
           setObjective((prev) => {
-            const updated = { ...prev, current: collected };
-            if (collected >= prev.total && !gameWon) {
-              setGameWon(true);
+            const updated = { ...prev, current: objectiveCount };
+            if (objectiveCount >= prev.total) {
+              goalReadyRef.current = true;
             }
             return updated;
           });
@@ -241,15 +158,20 @@ export function useGameManager(canvasState: CanvasState, genre: Genre) {
         return changed ? next : prev;
       });
     },
-    [gameWon, objective.type]
+    [gameWon]
   );
 
   return {
-    gameObjects,
+    layout,
+    elements,
     objective,
+    score,
     boosted,
     gameWon,
+    scorePopups,
+    collectEffects,
     initGame,
     checkCollisions,
+    removeCollectEffect,
   };
 }

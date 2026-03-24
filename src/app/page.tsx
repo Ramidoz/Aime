@@ -46,29 +46,26 @@ export default function Home() {
   const [pipelineStage, setPipelineStage] = useState("idle");
   const [showInsights, setShowInsights] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // Session memory
   const [sessionSummary, setSessionSummary] = useState("");
   const [recentBlocks, setRecentBlocks] = useState<Block[]>([]);
-
-  // 3D scene state
   const [lastSelectedBlock, setLastSelectedBlock] = useState<Block | null>(null);
   const [showConfetti, setShowConfetti] = useState(false);
-
-  // Play mode: show "Play Now" button after build completes
   const [showPlayButton, setShowPlayButton] = useState(false);
 
   const processingRef = useRef(false);
   const audioStartedRef = useRef(false);
 
-  // Game manager
   const {
-    gameObjects,
+    elements,
     objective,
+    score,
     boosted,
     gameWon,
+    scorePopups,
+    collectEffects,
     initGame,
     checkCollisions,
+    removeCollectEffect,
   } = useGameManager(canvasState, genre || "Racing");
 
   const ensureAudio = useCallback(() => {
@@ -82,7 +79,6 @@ export default function Home() {
     return () => stopAmbientLoop();
   }, []);
 
-  // Auto-dismiss errors
   useEffect(() => {
     if (error) {
       const timer = setTimeout(() => setError(null), 4000);
@@ -93,9 +89,11 @@ export default function Home() {
   // Detect game win
   useEffect(() => {
     if (gameWon && screen === "play") {
-      setShowConfetti(true);
-      setScreen("game-complete");
-      playCompletionSound();
+      setTimeout(() => {
+        setShowConfetti(true);
+        setScreen("game-complete");
+        playCompletionSound();
+      }, 800); // Brief delay for goal confetti to play
     }
   }, [gameWon, screen]);
 
@@ -123,7 +121,7 @@ export default function Home() {
         } else {
           throw new Error("Invalid block response");
         }
-      } catch (err) {
+      } catch {
         setError("Could not load ideas. Retrying...");
         setTimeout(() => {
           fetchInitialBlocks(selectedGenre, prefs, summary, recent);
@@ -145,8 +143,7 @@ export default function Home() {
       setShowConfetti(false);
       setShowPlayButton(false);
       setError(null);
-      const freshCanvas: CanvasState = { world: [], characters: [], theme: [], mood: [] };
-      setCanvasState(freshCanvas);
+      setCanvasState({ world: [], characters: [], theme: [], mood: [] });
       setNarration("");
       setBlocks([]);
       setTurn(1);
@@ -173,10 +170,8 @@ export default function Home() {
       try {
         setPipelineStage("updating-state");
         await delay(250);
-
         setPipelineStage("narrating");
         await delay(150);
-
         setPipelineStage("designing");
 
         const res = await fetch("/api/interactions", {
@@ -193,7 +188,6 @@ export default function Home() {
         });
 
         if (!res.ok) throw new Error(`API error: ${res.status}`);
-
         setPipelineStage("safety-check");
 
         const data: InteractionResponse = await res.json();
@@ -201,15 +195,9 @@ export default function Home() {
         if (data.canvas_state) setCanvasState(data.canvas_state);
         if (data.user_preferences) setPreferences(data.user_preferences);
         if (data.narration) setNarration(data.narration);
-        if (data.next_blocks && data.next_blocks.length === 3) {
-          setBlocks(data.next_blocks);
-        }
-        if (data.session_summary !== undefined) {
-          setSessionSummary(data.session_summary);
-        }
-        if (data.recent_blocks) {
-          setRecentBlocks(data.recent_blocks);
-        }
+        if (data.next_blocks && data.next_blocks.length === 3) setBlocks(data.next_blocks);
+        if (data.session_summary !== undefined) setSessionSummary(data.session_summary);
+        if (data.recent_blocks) setRecentBlocks(data.recent_blocks);
 
         setLastSelectedBlock(block);
         playSuccessSound();
@@ -217,11 +205,10 @@ export default function Home() {
         const nextTurn = turn + 1;
         setTurn(nextTurn);
 
-        // After last build turn, show "Play Now" button instead of completion
         if (nextTurn > MAX_TURNS) {
           setShowPlayButton(true);
         }
-      } catch (err) {
+      } catch {
         setError("Something went wrong. Try again!");
       } finally {
         setPipelineStage("idle");
@@ -239,12 +226,7 @@ export default function Home() {
     setShowPlayButton(false);
   }, [initGame]);
 
-  const handlePlayerUpdate = useCallback(
-    (_state: PlayerState) => {
-      // Could be used for additional effects
-    },
-    []
-  );
+  const handlePlayerUpdate = useCallback((_state: PlayerState) => {}, []);
 
   const handleCollision = useCallback(
     (position: [number, number, number]) => {
@@ -280,7 +262,7 @@ export default function Home() {
     setScreen("play");
   }, [initGame]);
 
-  // Genre selection / switch screen
+  // ─── Genre select ───
   if (screen === "genre-select" || screen === "genre-switch") {
     return (
       <GenrePicker
@@ -291,7 +273,7 @@ export default function Home() {
     );
   }
 
-  // Game complete screen (after winning the play mode)
+  // ─── Game complete (victory) ───
   if (screen === "game-complete") {
     return (
       <div className="h-screen flex flex-col">
@@ -306,19 +288,17 @@ export default function Home() {
             showConfetti={true}
           />
         </div>
-
         <div className="relative z-20 flex flex-col items-center justify-center h-full pointer-events-none">
-          <div className="bg-black/50 backdrop-blur-lg rounded-3xl p-10 border border-white/20 text-center pointer-events-auto animate-slide-up max-w-lg">
-            <div className="text-6xl mb-4">🏆</div>
-            <h1 className="text-4xl font-extrabold bg-gradient-to-r from-yellow-300 via-green-400 to-emerald-500 bg-clip-text text-transparent mb-3">
+          <div className="bg-black/60 backdrop-blur-lg rounded-3xl p-10 border border-white/20 text-center pointer-events-auto animate-slide-up max-w-md">
+            <div className="text-6xl mb-3">🏆</div>
+            <h1 className="text-4xl font-extrabold bg-gradient-to-r from-yellow-300 via-green-400 to-emerald-500 bg-clip-text text-transparent mb-2">
               You Win!
             </h1>
-            <p className="text-white/70 text-sm mb-2 leading-relaxed">
-              {objective.label} — Complete!
+            <p className="text-yellow-400 text-2xl font-extrabold mb-1">
+              {score.toLocaleString()} pts
             </p>
-            <p className="text-white/40 text-xs mb-6">
-              {canvasState.world.length} world items ·{" "}
-              {canvasState.characters.length} characters · {objective.total} objectives cleared
+            <p className="text-white/50 text-sm mb-6">
+              {objective.label}
             </p>
             <div className="flex gap-3 justify-center flex-wrap">
               <button
@@ -331,7 +311,7 @@ export default function Home() {
                 onClick={handleReset}
                 className="px-6 py-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-bold rounded-2xl hover:scale-105 transition-transform shadow-lg"
               >
-                Build New World
+                New World
               </button>
               <button
                 onClick={handleGenreSwitch}
@@ -346,11 +326,10 @@ export default function Home() {
     );
   }
 
-  // Play mode screen
+  // ─── Play mode ───
   if (screen === "play") {
     return (
       <div className="h-screen flex flex-col">
-        {/* Minimal top bar */}
         <header className="flex items-center justify-between px-6 py-2 bg-black/40 backdrop-blur-sm border-b border-white/10 z-20 relative">
           <div className="flex items-center gap-3">
             <h1 className="text-lg font-extrabold bg-gradient-to-r from-green-400 to-emerald-400 bg-clip-text text-transparent">
@@ -367,7 +346,6 @@ export default function Home() {
             Exit
           </button>
         </header>
-
         <main className="flex-1 relative">
           <CreationCanvas
             canvasState={canvasState}
@@ -378,9 +356,14 @@ export default function Home() {
             lastSelectedBlock={null}
             showConfetti={false}
             playMode={true}
-            gameObjects={gameObjects}
+            gameElements={elements}
             objective={objective}
+            score={score}
             boosted={boosted}
+            gameWon={gameWon}
+            scorePopups={scorePopups}
+            collectEffects={collectEffects}
+            onRemoveCollectEffect={removeCollectEffect}
             onPlayerUpdate={handlePlayerUpdate}
             onCollision={handleCollision}
           />
@@ -389,10 +372,9 @@ export default function Home() {
     );
   }
 
-  // Build mode screen
+  // ─── Build mode ───
   return (
     <div className="h-screen flex flex-col">
-      {/* Top Bar */}
       <header className="flex items-center justify-between px-6 py-3 bg-white/60 backdrop-blur-sm border-b border-gray-200/50">
         <div className="flex items-center gap-4">
           <h1 className="text-xl font-extrabold bg-gradient-to-r from-purple-600 to-pink-500 bg-clip-text text-transparent">
@@ -409,22 +391,15 @@ export default function Home() {
           )}
         </div>
         <div className="flex items-center gap-4">
-          <button
-            onClick={handleGenreSwitch}
-            className="text-sm text-purple-400 hover:text-purple-600 font-semibold transition-colors"
-          >
+          <button onClick={handleGenreSwitch} className="text-sm text-purple-400 hover:text-purple-600 font-semibold transition-colors">
             Switch Genre
           </button>
-          <button
-            onClick={handleReset}
-            className="text-sm text-gray-400 hover:text-gray-600 font-semibold transition-colors"
-          >
+          <button onClick={handleReset} className="text-sm text-gray-400 hover:text-gray-600 font-semibold transition-colors">
             Start Over
           </button>
         </div>
       </header>
 
-      {/* Error Toast */}
       {error && (
         <div className="absolute top-16 left-1/2 -translate-x-1/2 z-50 animate-slide-up">
           <div className="bg-red-500/90 backdrop-blur-sm text-white text-sm font-semibold px-4 py-2 rounded-xl shadow-lg">
@@ -433,9 +408,7 @@ export default function Home() {
         </div>
       )}
 
-      {/* Split Screen */}
       <main className="flex-1 flex gap-4 p-4 overflow-hidden">
-        {/* LEFT: 3D Creation Canvas */}
         <div className="flex-1 min-w-0">
           <CreationCanvas
             canvasState={canvasState}
@@ -449,8 +422,6 @@ export default function Home() {
             onPlayNow={handlePlayNow}
           />
         </div>
-
-        {/* RIGHT: Ideas Workshop + Insights (hidden after build complete) */}
         {turn <= MAX_TURNS && (
           <div className="w-[380px] flex-shrink-0 flex flex-col gap-3">
             <div className="flex-shrink-0">
@@ -461,7 +432,6 @@ export default function Home() {
                 onToggle={() => setShowInsights((v) => !v)}
               />
             </div>
-
             <div className="flex-1 min-h-0">
               <IdeasWorkshop
                 blocks={blocks}

@@ -104,17 +104,9 @@ export interface GameObjective {
   current: number;
 }
 
-export interface GameObject {
-  id: string;
-  type: "checkpoint" | "collectible" | "boost" | "obstacle" | "interactable";
-  position: [number, number, number];
-  label: string;
-  collected: boolean;
-}
-
 export interface PlayerState {
   position: [number, number, number];
-  rotation: number; // Y-axis rotation in radians
+  rotation: number;
   speed: number;
   boosted: boolean;
 }

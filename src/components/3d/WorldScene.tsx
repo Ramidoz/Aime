@@ -3,7 +3,8 @@
 import { Suspense, useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Stars } from "@react-three/drei";
-import { CanvasState, UserPreferences, Block, GameObject, PlayerState } from "@/types";
+import { CanvasState, UserPreferences, Block, PlayerState, GameObjective } from "@/types";
+import { PlacedElement } from "@/game/levelDesigner";
 import GroundPlane from "./GroundPlane";
 import SceneObject, { ObjectCategory } from "./SceneObject";
 import ParticleField from "./ParticleField";
@@ -12,6 +13,9 @@ import ConfettiExplosion from "./ConfettiExplosion";
 import PlayerController from "./PlayerController";
 import GameCamera from "./GameCamera";
 import GameObjects from "./GameObjects";
+import CollectParticles from "./particles/CollectParticles";
+import BoostTrail from "./particles/BoostTrail";
+import GoalConfetti from "./particles/GoalConfetti";
 
 interface WorldSceneProps {
   canvasState: CanvasState;
@@ -19,9 +23,13 @@ interface WorldSceneProps {
   preferences: UserPreferences;
   lastSelectedBlock: Block | null;
   showConfetti: boolean;
+  // Play mode props
   playMode?: boolean;
-  gameObjects?: GameObject[];
+  gameElements?: PlacedElement[];
   boosted?: boolean;
+  gameWon?: boolean;
+  collectEffects?: { id: number; position: [number, number, number]; color: string }[];
+  onRemoveCollectEffect?: (id: number) => void;
   onPlayerUpdate?: (state: PlayerState) => void;
   onCollision?: (position: [number, number, number]) => void;
 }
@@ -41,33 +49,13 @@ function buildSceneItems(
   const items: SceneItem[] = [];
 
   canvasState.world.forEach((label, i) => {
-    items.push({
-      id: `w-${i}-${label}`,
-      label,
-      category: "world",
-      styleTags: [],
-      isNew: false,
-    });
+    items.push({ id: `w-${i}-${label}`, label, category: "world", styleTags: [], isNew: false });
   });
-
   canvasState.characters.forEach((label, i) => {
-    items.push({
-      id: `c-${i}-${label}`,
-      label,
-      category: "character",
-      styleTags: [],
-      isNew: false,
-    });
+    items.push({ id: `c-${i}-${label}`, label, category: "character", styleTags: [], isNew: false });
   });
-
   canvasState.theme.forEach((label, i) => {
-    items.push({
-      id: `t-${i}-${label}`,
-      label,
-      category: "theme",
-      styleTags: [],
-      isNew: false,
-    });
+    items.push({ id: `t-${i}-${label}`, label, category: "theme", styleTags: [], isNew: false });
   });
 
   const prevCount = prevCountRef.current;
@@ -75,7 +63,6 @@ function buildSceneItems(
     items[items.length - 1].isNew = true;
   }
   prevCountRef.current = items.length;
-
   return items;
 }
 
@@ -94,20 +81,18 @@ function SceneContent({
   lastSelectedBlock,
   showConfetti,
   playMode = false,
-  gameObjects = [],
+  gameElements = [],
   boosted = false,
+  gameWon = false,
+  collectEffects = [],
+  onRemoveCollectEffect,
   onPlayerUpdate,
   onCollision,
 }: WorldSceneProps) {
   const prevCountRef = useRef(0);
-  const items = useMemo(
-    () => buildSceneItems(canvasState, prevCountRef),
-    [canvasState]
-  );
-  const globalTags = useMemo(
-    () => getGlobalStyleTags(preferences),
-    [preferences]
-  );
+  const items = useMemo(() => buildSceneItems(canvasState, prevCountRef), [canvasState]);
+  const globalTags = useMemo(() => getGlobalStyleTags(preferences), [preferences]);
+
   const [bursts, setBursts] = useState<
     { id: number; pos: [number, number, number]; color: string }[]
   >([]);
@@ -132,6 +117,7 @@ function SceneContent({
     [onCollision]
   );
 
+  // Spark bursts for build mode
   useEffect(() => {
     if (lastSelectedBlock && !playMode) {
       const newItem = items.find((i) => i.isNew);
@@ -145,11 +131,7 @@ function SceneContent({
           1,
           Math.sin(angle) * radius,
         ];
-
-        setBursts((prev) => [
-          ...prev,
-          { id: Date.now(), pos, color: "#ffaa00" },
-        ]);
+        setBursts((prev) => [...prev, { id: Date.now(), pos, color: "#ffaa00" }]);
       }
     }
   }, [lastSelectedBlock, items, playMode]);
@@ -160,11 +142,14 @@ function SceneContent({
 
   const isSpace = genre === "Space";
 
+  // Find goal position for confetti
+  const goalEl = gameElements.find((e) => e.type === "goal_zone");
+  const goalPos: [number, number, number] = goalEl?.position || [0, 0, 0];
+
   return (
     <>
-      {/* Camera: OrbitControls in build mode, GameCamera in play mode */}
       {playMode ? (
-        <GameCamera playerPosition={playerPos} playerRotation={playerRot} />
+        <GameCamera playerPosition={playerPos} playerRotation={playerRot} boosted={boosted} />
       ) : (
         <OrbitControls
           enableZoom={false}
@@ -177,21 +162,22 @@ function SceneContent({
         />
       )}
 
-      <ambientLight intensity={playMode ? 0.5 : 0.4} />
+      <ambientLight intensity={playMode ? 0.55 : 0.4} />
       <directionalLight
         position={[5, 8, 5]}
-        intensity={0.8}
+        intensity={0.9}
         castShadow
         shadow-mapSize-width={256}
         shadow-mapSize-height={256}
       />
       <pointLight position={[-5, 3, -5]} intensity={0.3} color="#8866ff" />
+      {playMode && <pointLight position={[5, 2, -3]} intensity={0.2} color="#ffaa44" />}
 
       {isSpace && <Stars radius={30} depth={20} count={200} factor={2} fade speed={0.5} />}
 
       <GroundPlane genre={genre} />
 
-      {/* In play mode, show scene objects as static decorations (no Float) */}
+      {/* Build mode: decorative scene objects */}
       {!playMode &&
         items.map((item, i) => (
           <SceneObject
@@ -205,7 +191,7 @@ function SceneContent({
           />
         ))}
 
-      {/* Play mode: player + game objects */}
+      {/* Play mode: player + game elements + particles */}
       {playMode && (
         <>
           <PlayerController
@@ -214,11 +200,25 @@ function SceneContent({
             boosted={boosted}
             genre={genre}
           />
-          <GameObjects objects={gameObjects} />
+          <GameObjects elements={gameElements} />
+          <BoostTrail playerPosition={playerPos} active={boosted} />
+
+          {/* Collect particle effects */}
+          {collectEffects.map((fx) => (
+            <CollectParticles
+              key={fx.id}
+              position={fx.position}
+              color={fx.color}
+              onComplete={() => onRemoveCollectEffect?.(fx.id)}
+            />
+          ))}
+
+          {/* Goal confetti when won */}
+          {gameWon && <GoalConfetti position={goalPos} active={gameWon} />}
         </>
       )}
 
-      <ParticleField genre={genre} count={playMode ? 20 : 40} />
+      <ParticleField genre={genre} count={playMode ? 15 : 40} />
 
       {!playMode &&
         bursts.map((b) => (
@@ -230,7 +230,7 @@ function SceneContent({
           />
         ))}
 
-      <ConfettiExplosion active={showConfetti} />
+      <ConfettiExplosion active={showConfetti && !playMode} />
     </>
   );
 }
@@ -240,11 +240,7 @@ export default function WorldScene(props: WorldSceneProps) {
     <div className="w-full h-full rounded-2xl overflow-hidden">
       <Canvas
         camera={{ position: [6, 4, 6], fov: 50, near: 0.1, far: 100 }}
-        gl={{
-          antialias: true,
-          alpha: true,
-          powerPreference: "high-performance",
-        }}
+        gl={{ antialias: true, alpha: true, powerPreference: "high-performance" }}
         dpr={[1, 1.5]}
         style={{ background: "transparent" }}
       >

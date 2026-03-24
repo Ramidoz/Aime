@@ -1,6 +1,8 @@
 "use client";
 
-import { CanvasState, UserPreferences, Block, GameObject, GameObjective, PlayerState } from "@/types";
+import { CanvasState, UserPreferences, Block, GameObjective, PlayerState } from "@/types";
+import { PlacedElement } from "@/game/levelDesigner";
+import { ScorePopup } from "@/game/feedback";
 import { useMemo, lazy, Suspense } from "react";
 import ErrorBoundary from "./ErrorBoundary";
 import GameHUD from "./GameHUD";
@@ -15,11 +17,16 @@ interface CreationCanvasProps {
   sessionSummary: string;
   lastSelectedBlock: Block | null;
   showConfetti: boolean;
-  // Play mode props
+  // Play mode
   playMode?: boolean;
-  gameObjects?: GameObject[];
+  gameElements?: PlacedElement[];
   objective?: GameObjective;
+  score?: number;
   boosted?: boolean;
+  gameWon?: boolean;
+  scorePopups?: ScorePopup[];
+  collectEffects?: { id: number; position: [number, number, number]; color: string }[];
+  onRemoveCollectEffect?: (id: number) => void;
   onPlayerUpdate?: (state: PlayerState) => void;
   onCollision?: (position: [number, number, number]) => void;
   onPlayNow?: () => void;
@@ -49,11 +56,7 @@ function useStyleEffects(preferences: UserPreferences) {
     const tags = Object.entries(preferences)
       .filter(([, v]) => v >= 0.3)
       .map(([k]) => k.toLowerCase());
-
-    const hasCute = tags.some((t) =>
-      ["cute", "cozy", "adorable", "warm"].includes(t)
-    );
-
+    const hasCute = tags.some((t) => ["cute", "cozy", "adorable", "warm"].includes(t));
     return { hasCute };
   }, [preferences]);
 }
@@ -67,32 +70,34 @@ export default function CreationCanvas({
   lastSelectedBlock,
   showConfetti,
   playMode = false,
-  gameObjects = [],
+  gameElements = [],
   objective,
+  score = 0,
   boosted = false,
+  gameWon = false,
+  scorePopups = [],
+  collectEffects = [],
+  onRemoveCollectEffect,
   onPlayerUpdate,
   onCollision,
   onPlayNow,
   showPlayButton = false,
 }: CreationCanvasProps) {
   const gradient = GENRE_GRADIENTS[genre] || GENRE_GRADIENTS.Space;
-  const isEmpty =
-    canvasState.world.length === 0 && canvasState.characters.length === 0;
+  const isEmpty = canvasState.world.length === 0 && canvasState.characters.length === 0;
   const style = useStyleEffects(preferences);
 
   return (
     <div
       className={`h-full bg-gradient-to-b ${gradient} ${style.hasCute ? "rounded-3xl" : "rounded-2xl"} overflow-hidden relative`}
     >
-      {/* 3D Scene — fills the entire canvas area */}
+      {/* 3D Scene */}
       <div className="absolute inset-0">
         <ErrorBoundary>
           <Suspense
             fallback={
               <div className="flex items-center justify-center h-full">
-                <div className="text-white/30 text-sm animate-pulse">
-                  Loading 3D world...
-                </div>
+                <div className="text-white/30 text-sm animate-pulse">Loading 3D world...</div>
               </div>
             }
           >
@@ -103,8 +108,11 @@ export default function CreationCanvas({
               lastSelectedBlock={lastSelectedBlock}
               showConfetti={showConfetti}
               playMode={playMode}
-              gameObjects={gameObjects}
+              gameElements={gameElements}
               boosted={boosted}
+              gameWon={gameWon}
+              collectEffects={collectEffects}
+              onRemoveCollectEffect={onRemoveCollectEffect}
               onPlayerUpdate={onPlayerUpdate}
               onCollision={onCollision}
             />
@@ -112,101 +120,72 @@ export default function CreationCanvas({
         </ErrorBoundary>
       </div>
 
-      {/* Game HUD — shown in play mode */}
+      {/* Game HUD — play mode only */}
       {playMode && objective && (
-        <GameHUD objective={objective} genre={genre} boosted={boosted} />
+        <GameHUD
+          objective={objective}
+          score={score}
+          boosted={boosted}
+          scorePopups={scorePopups}
+        />
       )}
 
-      {/* UI Overlay — on top of 3D scene (build mode only) */}
+      {/* Build mode UI overlay */}
       {!playMode && (
         <div className="relative z-10 flex flex-col h-full p-6 pointer-events-none">
-          {/* Header */}
           <div className="mb-4 pointer-events-auto">
-            <h2
-              className={`text-2xl font-extrabold text-white/90 mb-1 drop-shadow-lg ${style.hasCute ? "tracking-wide" : ""}`}
-            >
+            <h2 className={`text-2xl font-extrabold text-white/90 mb-1 drop-shadow-lg ${style.hasCute ? "tracking-wide" : ""}`}>
               Your World
             </h2>
             <div className="h-0.5 w-16 bg-gradient-to-r from-purple-400 to-pink-400 rounded-full" />
           </div>
 
-          {/* Narration */}
           {narration && (
-            <div
-              className={`animate-fade-in mb-4 bg-black/40 backdrop-blur-md p-4 border border-white/10 pointer-events-auto ${style.hasCute ? "rounded-2xl" : "rounded-xl"}`}
-            >
-              <p className="text-white/90 text-sm leading-relaxed italic drop-shadow-md">
-                {narration}
-              </p>
+            <div className={`animate-fade-in mb-4 bg-black/40 backdrop-blur-md p-4 border border-white/10 pointer-events-auto ${style.hasCute ? "rounded-2xl" : "rounded-xl"}`}>
+              <p className="text-white/90 text-sm leading-relaxed italic drop-shadow-md">{narration}</p>
             </div>
           )}
 
-          {/* Session Summary */}
           {sessionSummary && (
             <div className="mb-4 px-3 py-2 bg-black/30 backdrop-blur-sm rounded-lg border border-white/5 pointer-events-auto">
               <p className="text-white/40 text-xs">
-                <span className="font-bold text-white/50">Story so far:</span>{" "}
-                {sessionSummary}
+                <span className="font-bold text-white/50">Story so far:</span> {sessionSummary}
               </p>
             </div>
           )}
 
-          {/* Spacer */}
           <div className="flex-1" />
 
-          {/* Play Now Button */}
           {showPlayButton && (
             <div className="flex justify-center mb-6 pointer-events-auto animate-slide-up">
               <button
                 onClick={onPlayNow}
-                className="px-8 py-4 bg-gradient-to-r from-green-500 to-emerald-500 text-white font-extrabold text-lg rounded-2xl hover:scale-105 active:scale-95 transition-all shadow-lg shadow-green-500/30 border border-green-400/30"
+                className="group px-10 py-5 bg-gradient-to-r from-green-500 to-emerald-500 text-white font-extrabold text-xl rounded-2xl hover:scale-110 active:scale-95 transition-all shadow-xl shadow-green-500/40 border border-green-400/30"
               >
+                <span className="mr-2">🎮</span>
                 Play Now!
               </button>
             </div>
           )}
 
-          {/* Bottom info bar */}
           {isEmpty ? (
             <div className="flex flex-col items-center justify-center text-white/40 mb-8">
               <div className="text-5xl mb-3 animate-float">✨</div>
-              <p className="text-lg font-semibold drop-shadow-md">
-                Your world is empty...
-              </p>
-              <p className="text-sm drop-shadow-md">
-                Pick a block to start building!
-              </p>
+              <p className="text-lg font-semibold drop-shadow-md">Your world is empty...</p>
+              <p className="text-sm drop-shadow-md">Pick a block to start building!</p>
             </div>
           ) : (
             <div className="pointer-events-auto">
               <div className="bg-black/40 backdrop-blur-md rounded-xl p-3 border border-white/10">
                 <div className="flex flex-wrap gap-1.5 items-center">
                   {canvasState.world.map((item, i) => (
-                    <Tag
-                      key={`w-${i}`}
-                      label={item}
-                      colorIdx={i}
-                      cute={style.hasCute}
-                      icon="🌍"
-                    />
+                    <Tag key={`w-${i}`} label={item} colorIdx={i} cute={style.hasCute} icon="🌍" />
                   ))}
                   {canvasState.characters.map((item, i) => (
-                    <Tag
-                      key={`c-${i}`}
-                      label={item}
-                      colorIdx={i + 2}
-                      cute={style.hasCute}
-                      icon="👾"
-                    />
+                    <Tag key={`c-${i}`} label={item} colorIdx={i + 2} cute={style.hasCute} icon="👾" />
                   ))}
                   {canvasState.theme.map((item, i) => (
-                    <Tag
-                      key={`t-${i}`}
-                      label={item}
-                      colorIdx={i + 4}
-                      cute={style.hasCute}
-                      icon="🎨"
-                    />
+                    <Tag key={`t-${i}`} label={item} colorIdx={i + 4} cute={style.hasCute} icon="🎨" />
                   ))}
                   {canvasState.mood.length > 0 && (
                     <span className="text-white/50 text-xs font-semibold capitalize ml-1">
@@ -227,22 +206,10 @@ export default function CreationCanvas({
   );
 }
 
-function Tag({
-  label,
-  colorIdx,
-  cute,
-  icon,
-}: {
-  label: string;
-  colorIdx: number;
-  cute: boolean;
-  icon: string;
-}) {
+function Tag({ label, colorIdx, cute, icon }: { label: string; colorIdx: number; cute: boolean; icon: string }) {
   const color = TAG_COLORS[colorIdx % TAG_COLORS.length];
   return (
-    <span
-      className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold border ${color} capitalize ${cute ? "rounded-2xl" : "rounded-full"}`}
-    >
+    <span className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold border ${color} capitalize ${cute ? "rounded-2xl" : "rounded-full"}`}>
       <span className="text-[10px]">{icon}</span>
       {label}
     </span>

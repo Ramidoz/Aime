@@ -57,3 +57,13 @@ body {
   50% { opacity: 1; }
   100% { transform: translateX(800%); opacity: 0; }
 }
+
+@keyframes scorePopup {
+  0% { opacity: 0; transform: translateY(0) scale(0.5); }
+  20% { opacity: 1; transform: translateY(-10px) scale(1.2); }
+  100% { opacity: 0; transform: translateY(-60px) scale(0.8); }
+}
+
+.animate-score-popup {
+  animation: scorePopup 1s ease-out forwards;
+}
