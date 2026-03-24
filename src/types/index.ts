@@ -90,3 +90,31 @@ export interface AIInsights {
 }
 
 export type Genre = "Racing" | "Pets" | "Space" | "Fantasy" | "Ocean" | "Dinosaurs";
+
+// ─── Game / Play Mode Types ───
+
+export type GameMode = "build" | "play" | "complete";
+
+export type ObjectiveType = "racing" | "collect" | "interact";
+
+export interface GameObjective {
+  type: ObjectiveType;
+  label: string;
+  total: number;
+  current: number;
+}
+
+export interface GameObject {
+  id: string;
+  type: "checkpoint" | "collectible" | "boost" | "obstacle" | "interactable";
+  position: [number, number, number];
+  label: string;
+  collected: boolean;
+}
+
+export interface PlayerState {
+  position: [number, number, number];
+  rotation: number; // Y-axis rotation in radians
+  speed: number;
+  boosted: boolean;
+}

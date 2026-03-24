@@ -8,12 +8,14 @@ import {
   UserPreferences,
   BlocksResponse,
   InteractionResponse,
+  PlayerState,
 } from "@/types";
 import GenrePicker from "@/components/GenrePicker";
 import CreationCanvas from "@/components/CreationCanvas";
 import IdeasWorkshop from "@/components/IdeasWorkshop";
 import AIInsightsPanel from "@/components/AIInsightsPanel";
 import ProgressBar from "@/components/ProgressBar";
+import { useGameManager } from "@/hooks/useGameManager";
 import {
   playClickSound,
   playSuccessSound,
@@ -23,9 +25,9 @@ import {
   stopAmbientLoop,
 } from "@/utils/audio";
 
-type AppScreen = "genre-select" | "game" | "genre-switch" | "complete";
+type AppScreen = "genre-select" | "build" | "genre-switch" | "play" | "game-complete";
 
-const MAX_TURNS = 10;
+const MAX_TURNS = 4;
 
 export default function Home() {
   const [screen, setScreen] = useState<AppScreen>("genre-select");
@@ -53,8 +55,21 @@ export default function Home() {
   const [lastSelectedBlock, setLastSelectedBlock] = useState<Block | null>(null);
   const [showConfetti, setShowConfetti] = useState(false);
 
+  // Play mode: show "Play Now" button after build completes
+  const [showPlayButton, setShowPlayButton] = useState(false);
+
   const processingRef = useRef(false);
   const audioStartedRef = useRef(false);
+
+  // Game manager
+  const {
+    gameObjects,
+    objective,
+    boosted,
+    gameWon,
+    initGame,
+    checkCollisions,
+  } = useGameManager(canvasState, genre || "Racing");
 
   const ensureAudio = useCallback(() => {
     if (!audioStartedRef.current) {
@@ -74,6 +89,15 @@ export default function Home() {
       return () => clearTimeout(timer);
     }
   }, [error]);
+
+  // Detect game win
+  useEffect(() => {
+    if (gameWon && screen === "play") {
+      setShowConfetti(true);
+      setScreen("game-complete");
+      playCompletionSound();
+    }
+  }, [gameWon, screen]);
 
   const fetchInitialBlocks = useCallback(
     async (selectedGenre: Genre, prefs: UserPreferences, summary: string, recent: Block[]) => {
@@ -101,7 +125,6 @@ export default function Home() {
         }
       } catch (err) {
         setError("Could not load ideas. Retrying...");
-        // Retry once after a short delay
         setTimeout(() => {
           fetchInitialBlocks(selectedGenre, prefs, summary, recent);
         }, 2000);
@@ -118,8 +141,9 @@ export default function Home() {
       ensureAudio();
       playClickSound();
       setGenre(selectedGenre);
-      setScreen("game");
+      setScreen("build");
       setShowConfetti(false);
+      setShowPlayButton(false);
       setError(null);
       const freshCanvas: CanvasState = { world: [], characters: [], theme: [], mood: [] };
       setCanvasState(freshCanvas);
@@ -193,11 +217,9 @@ export default function Home() {
         const nextTurn = turn + 1;
         setTurn(nextTurn);
 
+        // After last build turn, show "Play Now" button instead of completion
         if (nextTurn > MAX_TURNS) {
-          setShowConfetti(true);
-          setScreen("complete");
-          playCompletionSound();
-          stopAmbientLoop();
+          setShowPlayButton(true);
         }
       } catch (err) {
         setError("Something went wrong. Try again!");
@@ -208,6 +230,27 @@ export default function Home() {
       }
     },
     [genre, canvasState, preferences, loading, sessionSummary, recentBlocks, turn, ensureAudio]
+  );
+
+  const handlePlayNow = useCallback(() => {
+    playClickSound();
+    initGame();
+    setScreen("play");
+    setShowPlayButton(false);
+  }, [initGame]);
+
+  const handlePlayerUpdate = useCallback(
+    (_state: PlayerState) => {
+      // Could be used for additional effects
+    },
+    []
+  );
+
+  const handleCollision = useCallback(
+    (position: [number, number, number]) => {
+      checkCollisions(position);
+    },
+    [checkCollisions]
   );
 
   const handleReset = useCallback(() => {
@@ -226,8 +269,16 @@ export default function Home() {
     setShowInsights(false);
     setLastSelectedBlock(null);
     setShowConfetti(false);
+    setShowPlayButton(false);
     setError(null);
   }, []);
+
+  const handlePlayAgain = useCallback(() => {
+    playClickSound();
+    setShowConfetti(false);
+    initGame();
+    setScreen("play");
+  }, [initGame]);
 
   // Genre selection / switch screen
   if (screen === "genre-select" || screen === "genre-switch") {
@@ -240,8 +291,8 @@ export default function Home() {
     );
   }
 
-  // Completion screen
-  if (screen === "complete") {
+  // Game complete screen (after winning the play mode)
+  if (screen === "game-complete") {
     return (
       <div className="h-screen flex flex-col">
         <div className="absolute inset-0">
@@ -258,18 +309,24 @@ export default function Home() {
 
         <div className="relative z-20 flex flex-col items-center justify-center h-full pointer-events-none">
           <div className="bg-black/50 backdrop-blur-lg rounded-3xl p-10 border border-white/20 text-center pointer-events-auto animate-slide-up max-w-lg">
-            <div className="text-6xl mb-4">🎉</div>
-            <h1 className="text-4xl font-extrabold bg-gradient-to-r from-yellow-300 via-pink-400 to-purple-500 bg-clip-text text-transparent mb-3">
-              World Complete!
+            <div className="text-6xl mb-4">🏆</div>
+            <h1 className="text-4xl font-extrabold bg-gradient-to-r from-yellow-300 via-green-400 to-emerald-500 bg-clip-text text-transparent mb-3">
+              You Win!
             </h1>
             <p className="text-white/70 text-sm mb-2 leading-relaxed">
-              {sessionSummary || "You built an amazing world!"}
+              {objective.label} — Complete!
             </p>
             <p className="text-white/40 text-xs mb-6">
               {canvasState.world.length} world items ·{" "}
-              {canvasState.characters.length} characters · {turn - 1} turns
+              {canvasState.characters.length} characters · {objective.total} objectives cleared
             </p>
-            <div className="flex gap-3 justify-center">
+            <div className="flex gap-3 justify-center flex-wrap">
+              <button
+                onClick={handlePlayAgain}
+                className="px-6 py-3 bg-gradient-to-r from-green-500 to-emerald-500 text-white font-bold rounded-2xl hover:scale-105 transition-transform shadow-lg"
+              >
+                Play Again
+              </button>
               <button
                 onClick={handleReset}
                 className="px-6 py-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-bold rounded-2xl hover:scale-105 transition-transform shadow-lg"
@@ -289,7 +346,50 @@ export default function Home() {
     );
   }
 
-  // Main game screen
+  // Play mode screen
+  if (screen === "play") {
+    return (
+      <div className="h-screen flex flex-col">
+        {/* Minimal top bar */}
+        <header className="flex items-center justify-between px-6 py-2 bg-black/40 backdrop-blur-sm border-b border-white/10 z-20 relative">
+          <div className="flex items-center gap-3">
+            <h1 className="text-lg font-extrabold bg-gradient-to-r from-green-400 to-emerald-400 bg-clip-text text-transparent">
+              Play Mode
+            </h1>
+            <span className="bg-green-500/20 text-green-300 px-3 py-1 rounded-full text-xs font-bold">
+              {genre}
+            </span>
+          </div>
+          <button
+            onClick={handleReset}
+            className="text-sm text-white/40 hover:text-white/70 font-semibold transition-colors"
+          >
+            Exit
+          </button>
+        </header>
+
+        <main className="flex-1 relative">
+          <CreationCanvas
+            canvasState={canvasState}
+            genre={genre!}
+            narration=""
+            preferences={preferences}
+            sessionSummary=""
+            lastSelectedBlock={null}
+            showConfetti={false}
+            playMode={true}
+            gameObjects={gameObjects}
+            objective={objective}
+            boosted={boosted}
+            onPlayerUpdate={handlePlayerUpdate}
+            onCollision={handleCollision}
+          />
+        </main>
+      </div>
+    );
+  }
+
+  // Build mode screen
   return (
     <div className="h-screen flex flex-col">
       {/* Top Bar */}
@@ -302,6 +402,11 @@ export default function Home() {
             {genre}
           </span>
           <ProgressBar current={turn} max={MAX_TURNS} />
+          {turn > MAX_TURNS && (
+            <span className="text-green-600 text-xs font-bold animate-pulse">
+              Build complete!
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-4">
           <button
@@ -340,30 +445,34 @@ export default function Home() {
             sessionSummary={sessionSummary}
             lastSelectedBlock={lastSelectedBlock}
             showConfetti={false}
+            showPlayButton={showPlayButton}
+            onPlayNow={handlePlayNow}
           />
         </div>
 
-        {/* RIGHT: Ideas Workshop + Insights */}
-        <div className="w-[380px] flex-shrink-0 flex flex-col gap-3">
-          <div className="flex-shrink-0">
-            <AIInsightsPanel
-              preferences={preferences}
-              canvasState={canvasState}
-              visible={showInsights}
-              onToggle={() => setShowInsights((v) => !v)}
-            />
-          </div>
+        {/* RIGHT: Ideas Workshop + Insights (hidden after build complete) */}
+        {turn <= MAX_TURNS && (
+          <div className="w-[380px] flex-shrink-0 flex flex-col gap-3">
+            <div className="flex-shrink-0">
+              <AIInsightsPanel
+                preferences={preferences}
+                canvasState={canvasState}
+                visible={showInsights}
+                onToggle={() => setShowInsights((v) => !v)}
+              />
+            </div>
 
-          <div className="flex-1 min-h-0">
-            <IdeasWorkshop
-              blocks={blocks}
-              onSelectBlock={handleBlockSelect}
-              loading={loading}
-              turn={turn}
-              pipelineStage={pipelineStage}
-            />
+            <div className="flex-1 min-h-0">
+              <IdeasWorkshop
+                blocks={blocks}
+                onSelectBlock={handleBlockSelect}
+                loading={loading}
+                turn={turn}
+                pipelineStage={pipelineStage}
+              />
+            </div>
           </div>
-        </div>
+        )}
       </main>
     </div>
   );

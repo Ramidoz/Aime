@@ -3,12 +3,15 @@
 import { Suspense, useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Stars } from "@react-three/drei";
-import { CanvasState, UserPreferences, Block } from "@/types";
+import { CanvasState, UserPreferences, Block, GameObject, PlayerState } from "@/types";
 import GroundPlane from "./GroundPlane";
 import SceneObject, { ObjectCategory } from "./SceneObject";
 import ParticleField from "./ParticleField";
 import SparkBurst from "./SparkBurst";
 import ConfettiExplosion from "./ConfettiExplosion";
+import PlayerController from "./PlayerController";
+import GameCamera from "./GameCamera";
+import GameObjects from "./GameObjects";
 
 interface WorldSceneProps {
   canvasState: CanvasState;
@@ -16,6 +19,11 @@ interface WorldSceneProps {
   preferences: UserPreferences;
   lastSelectedBlock: Block | null;
   showConfetti: boolean;
+  playMode?: boolean;
+  gameObjects?: GameObject[];
+  boosted?: boolean;
+  onPlayerUpdate?: (state: PlayerState) => void;
+  onCollision?: (position: [number, number, number]) => void;
 }
 
 interface SceneItem {
@@ -85,6 +93,11 @@ function SceneContent({
   preferences,
   lastSelectedBlock,
   showConfetti,
+  playMode = false,
+  gameObjects = [],
+  boosted = false,
+  onPlayerUpdate,
+  onCollision,
 }: WorldSceneProps) {
   const prevCountRef = useRef(0);
   const items = useMemo(
@@ -99,8 +112,28 @@ function SceneContent({
     { id: number; pos: [number, number, number]; color: string }[]
   >([]);
 
+  // Player state for camera
+  const [playerPos, setPlayerPos] = useState<[number, number, number]>([0, 0.3, 8]);
+  const [playerRot, setPlayerRot] = useState(0);
+
+  const handlePlayerUpdate = useCallback(
+    (state: PlayerState) => {
+      setPlayerPos(state.position);
+      setPlayerRot(state.rotation);
+      onPlayerUpdate?.(state);
+    },
+    [onPlayerUpdate]
+  );
+
+  const handleCollision = useCallback(
+    (position: [number, number, number]) => {
+      onCollision?.(position);
+    },
+    [onCollision]
+  );
+
   useEffect(() => {
-    if (lastSelectedBlock) {
+    if (lastSelectedBlock && !playMode) {
       const newItem = items.find((i) => i.isNew);
       if (newItem) {
         const idx = items.indexOf(newItem);
@@ -119,7 +152,7 @@ function SceneContent({
         ]);
       }
     }
-  }, [lastSelectedBlock, items]);
+  }, [lastSelectedBlock, items, playMode]);
 
   const removeBurst = useCallback((id: number) => {
     setBursts((prev) => prev.filter((b) => b.id !== id));
@@ -129,17 +162,22 @@ function SceneContent({
 
   return (
     <>
-      <OrbitControls
-        enableZoom={false}
-        enablePan={false}
-        maxPolarAngle={Math.PI / 2.2}
-        minPolarAngle={Math.PI / 4}
-        autoRotate
-        autoRotateSpeed={showConfetti ? 0.8 : 0.3}
-        target={[0, 0.5, 0]}
-      />
+      {/* Camera: OrbitControls in build mode, GameCamera in play mode */}
+      {playMode ? (
+        <GameCamera playerPosition={playerPos} playerRotation={playerRot} />
+      ) : (
+        <OrbitControls
+          enableZoom={false}
+          enablePan={false}
+          maxPolarAngle={Math.PI / 2.2}
+          minPolarAngle={Math.PI / 4}
+          autoRotate
+          autoRotateSpeed={showConfetti ? 0.8 : 0.3}
+          target={[0, 0.5, 0]}
+        />
+      )}
 
-      <ambientLight intensity={0.4} />
+      <ambientLight intensity={playMode ? 0.5 : 0.4} />
       <directionalLight
         position={[5, 8, 5]}
         intensity={0.8}
@@ -153,28 +191,44 @@ function SceneContent({
 
       <GroundPlane genre={genre} />
 
-      {items.map((item, i) => (
-        <SceneObject
-          key={item.id}
-          label={item.label}
-          category={item.category}
-          index={i}
-          total={items.length}
-          styleTags={item.styleTags.length > 0 ? item.styleTags : globalTags}
-          isNew={item.isNew}
-        />
-      ))}
+      {/* In play mode, show scene objects as static decorations (no Float) */}
+      {!playMode &&
+        items.map((item, i) => (
+          <SceneObject
+            key={item.id}
+            label={item.label}
+            category={item.category}
+            index={i}
+            total={items.length}
+            styleTags={item.styleTags.length > 0 ? item.styleTags : globalTags}
+            isNew={item.isNew}
+          />
+        ))}
 
-      <ParticleField genre={genre} count={40} />
+      {/* Play mode: player + game objects */}
+      {playMode && (
+        <>
+          <PlayerController
+            onPositionUpdate={handlePlayerUpdate}
+            onCollision={handleCollision}
+            boosted={boosted}
+            genre={genre}
+          />
+          <GameObjects objects={gameObjects} />
+        </>
+      )}
 
-      {bursts.map((b) => (
-        <SparkBurst
-          key={b.id}
-          position={b.pos}
-          color={b.color}
-          onComplete={() => removeBurst(b.id)}
-        />
-      ))}
+      <ParticleField genre={genre} count={playMode ? 20 : 40} />
+
+      {!playMode &&
+        bursts.map((b) => (
+          <SparkBurst
+            key={b.id}
+            position={b.pos}
+            color={b.color}
+            onComplete={() => removeBurst(b.id)}
+          />
+        ))}
 
       <ConfettiExplosion active={showConfetti} />
     </>
