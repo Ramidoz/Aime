@@ -1,0 +1,27 @@
+[gd_scene load_steps=2 format=3 uid="uid://collectible"]
+
+[ext_resource type="Script" path="res://scripts/game/collectible.gd" id="1_collect"]
+
+[node name="Collectible" type="Node3D"]
+script = ExtResource("1_collect")
+
+[node name="MeshPivot" type="Node3D" parent="."]
+
+[node name="StarMesh" type="MeshInstance3D" parent="MeshPivot"]
+mesh = SubResource("SphereMesh_star")
+
+[node name="Area3D" type="Area3D" parent="."]
+collision_layer = 4
+collision_mask = 0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Area3D"]
+shape = SubResource("SphereShape3D_trigger")
+
+[sub_resource type="SphereMesh" id="SphereMesh_star"]
+radius = 0.3
+height = 0.6
+radial_segments = 8
+rings = 4
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_trigger"]
+radius = 0.8

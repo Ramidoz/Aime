@@ -1,0 +1,68 @@
+[gd_scene load_steps=3 format=3 uid="uid://game_world"]
+
+[ext_resource type="Script" path="res://scripts/game/game_world.gd" id="1_world"]
+[ext_resource type="Script" path="res://scripts/player/player_controller.gd" id="2_player"]
+
+[node name="GameWorld" type="Node3D"]
+script = ExtResource("1_world")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.707, 0.707, 0, -0.707, 0.707, 0, 10, 5)
+light_energy = 1.0
+shadow_enabled = true
+
+[node name="AmbientLight" type="DirectionalLight3D" parent="."]
+light_color = Color(0.6, 0.65, 0.75, 1)
+light_energy = 0.3
+
+[node name="Ground" type="StaticBody3D" parent="."]
+
+[node name="GroundMesh" type="MeshInstance3D" parent="Ground"]
+mesh = SubResource("PlaneMesh_ground")
+
+[node name="GroundCollision" type="CollisionShape3D" parent="Ground"]
+shape = SubResource("WorldBoundaryShape3D_ground")
+
+[node name="Player" type="CharacterBody3D" parent="."]
+script = ExtResource("2_player")
+
+[node name="Mesh" type="Node3D" parent="Player"]
+
+[node name="PlayerBody" type="MeshInstance3D" parent="Player/Mesh"]
+mesh = SubResource("CapsuleMesh_player")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Player"]
+shape = SubResource("CapsuleShape3D_player")
+
+[node name="CollectArea" type="Area3D" parent="Player"]
+
+[node name="CollectShape" type="CollisionShape3D" parent="Player/CollectArea"]
+shape = SubResource("SphereShape3D_collect")
+
+[node name="CameraPivot" type="Node3D" parent="."]
+
+[node name="Camera3D" type="Camera3D" parent="CameraPivot"]
+transform = Transform3D(1, 0, 0, 0, 0.85, 0.52, 0, -0.52, 0.85, 0, 4, 6)
+fov = 50.0
+
+[node name="Elements" type="Node3D" parent="."]
+
+[node name="HUD" type="CanvasLayer" parent="."]
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_ground"]
+size = Vector2(50, 50)
+
+[sub_resource type="WorldBoundaryShape3D" id="WorldBoundaryShape3D_ground"]
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_player"]
+radius = 0.3
+height = 0.8
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_player"]
+radius = 0.3
+height = 0.8
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_collect"]
+radius = 1.2

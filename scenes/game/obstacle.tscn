@@ -1,0 +1,22 @@
+[gd_scene load_steps=2 format=3 uid="uid://obstacle"]
+
+[ext_resource type="Script" path="res://scripts/game/obstacle.gd" id="1_obstacle"]
+
+[node name="Obstacle" type="Node3D"]
+script = ExtResource("1_obstacle")
+
+[node name="Mesh" type="MeshInstance3D" parent="."]
+mesh = SubResource("BoxMesh_obstacle")
+
+[node name="Area3D" type="Area3D" parent="."]
+collision_layer = 8
+collision_mask = 0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Area3D"]
+shape = SubResource("BoxShape3D_trigger")
+
+[sub_resource type="BoxMesh" id="BoxMesh_obstacle"]
+size = Vector3(0.8, 0.8, 0.8)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_trigger"]
+size = Vector3(1.0, 1.0, 1.0)

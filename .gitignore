@@ -1,0 +1,21 @@
+# Godot 4.x .gitignore
+
+# Godot-specific ignores
+.godot/
+*.translation
+
+# Imported resources
+.import/
+
+# Editor settings
+*.cfg
+!project.godot
+!export_presets.cfg
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Builds
+builds/
+export/
