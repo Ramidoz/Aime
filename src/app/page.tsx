@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import {
   Genre,
   Block,
@@ -13,8 +13,18 @@ import GenrePicker from "@/components/GenrePicker";
 import CreationCanvas from "@/components/CreationCanvas";
 import IdeasWorkshop from "@/components/IdeasWorkshop";
 import AIInsightsPanel from "@/components/AIInsightsPanel";
+import {
+  playClickSound,
+  playSuccessSound,
+  playSpawnSound,
+  playCompletionSound,
+  startAmbientLoop,
+  stopAmbientLoop,
+} from "@/utils/audio";
 
-type AppScreen = "genre-select" | "game" | "genre-switch";
+type AppScreen = "genre-select" | "game" | "genre-switch" | "complete";
+
+const MAX_TURNS = 10;
 
 export default function Home() {
   const [screen, setScreen] = useState<AppScreen>("genre-select");
@@ -37,8 +47,26 @@ export default function Home() {
   const [sessionSummary, setSessionSummary] = useState("");
   const [recentBlocks, setRecentBlocks] = useState<Block[]>([]);
 
+  // 3D scene state
+  const [lastSelectedBlock, setLastSelectedBlock] = useState<Block | null>(null);
+  const [showConfetti, setShowConfetti] = useState(false);
+
   // Prevent double-clicks
   const processingRef = useRef(false);
+  // Track if audio was started (requires user interaction)
+  const audioStartedRef = useRef(false);
+
+  const ensureAudio = useCallback(() => {
+    if (!audioStartedRef.current) {
+      audioStartedRef.current = true;
+      startAmbientLoop();
+    }
+  }, []);
+
+  // Stop ambient on unmount
+  useEffect(() => {
+    return () => stopAmbientLoop();
+  }, []);
 
   const fetchInitialBlocks = useCallback(
     async (selectedGenre: Genre, prefs: UserPreferences, summary: string, recent: Block[]) => {
@@ -72,20 +100,24 @@ export default function Home() {
 
   const handleGenreSelect = useCallback(
     (selectedGenre: Genre) => {
+      ensureAudio();
+      playClickSound();
       setGenre(selectedGenre);
       setScreen("game");
-      // Reset canvas state for new genre but keep preferences
+      setShowConfetti(false);
       const freshCanvas: CanvasState = { world: [], characters: [], theme: [], mood: [] };
       setCanvasState(freshCanvas);
       setNarration("");
       setBlocks([]);
       setTurn(1);
+      setLastSelectedBlock(null);
       fetchInitialBlocks(selectedGenre, preferences, sessionSummary, recentBlocks);
     },
-    [fetchInitialBlocks, preferences, sessionSummary, recentBlocks]
+    [fetchInitialBlocks, preferences, sessionSummary, recentBlocks, ensureAudio]
   );
 
   const handleGenreSwitch = useCallback(() => {
+    playClickSound();
     setScreen("genre-switch");
   }, []);
 
@@ -94,9 +126,10 @@ export default function Home() {
       if (!genre || loading || processingRef.current) return;
       processingRef.current = true;
       setLoading(true);
+      ensureAudio();
+      playSpawnSound();
 
       try {
-        // Animate pipeline stages
         setPipelineStage("updating-state");
         await delay(300);
 
@@ -134,7 +167,20 @@ export default function Home() {
         if (data.recent_blocks) {
           setRecentBlocks(data.recent_blocks);
         }
-        setTurn((t) => t + 1);
+
+        setLastSelectedBlock(block);
+        playSuccessSound();
+
+        const nextTurn = turn + 1;
+        setTurn(nextTurn);
+
+        // Check if game is complete
+        if (nextTurn > MAX_TURNS) {
+          setShowConfetti(true);
+          setScreen("complete");
+          playCompletionSound();
+          stopAmbientLoop();
+        }
       } catch (err) {
         console.error("Failed to process interaction:", err);
       } finally {
@@ -143,10 +189,13 @@ export default function Home() {
         processingRef.current = false;
       }
     },
-    [genre, canvasState, preferences, loading, sessionSummary, recentBlocks]
+    [genre, canvasState, preferences, loading, sessionSummary, recentBlocks, turn, ensureAudio]
   );
 
   const handleReset = useCallback(() => {
+    playClickSound();
+    stopAmbientLoop();
+    audioStartedRef.current = false;
     setScreen("genre-select");
     setGenre(null);
     setCanvasState({ world: [], characters: [], theme: [], mood: [] });
@@ -157,6 +206,8 @@ export default function Home() {
     setSessionSummary("");
     setRecentBlocks([]);
     setShowInsights(false);
+    setLastSelectedBlock(null);
+    setShowConfetti(false);
   }, []);
 
   // Genre selection / switch screen
@@ -167,6 +218,57 @@ export default function Home() {
         isSwitch={screen === "genre-switch"}
         currentGenre={genre}
       />
+    );
+  }
+
+  // Completion screen
+  if (screen === "complete") {
+    return (
+      <div className="h-screen flex flex-col">
+        {/* Full-screen 3D scene with confetti */}
+        <div className="absolute inset-0">
+          <CreationCanvas
+            canvasState={canvasState}
+            genre={genre!}
+            narration=""
+            preferences={preferences}
+            sessionSummary={sessionSummary}
+            lastSelectedBlock={lastSelectedBlock}
+            showConfetti={true}
+          />
+        </div>
+
+        {/* Completion overlay */}
+        <div className="relative z-20 flex flex-col items-center justify-center h-full pointer-events-none">
+          <div className="bg-black/50 backdrop-blur-lg rounded-3xl p-10 border border-white/20 text-center pointer-events-auto animate-slide-up max-w-lg">
+            <div className="text-6xl mb-4">🎉</div>
+            <h1 className="text-4xl font-extrabold bg-gradient-to-r from-yellow-300 via-pink-400 to-purple-500 bg-clip-text text-transparent mb-3">
+              World Complete!
+            </h1>
+            <p className="text-white/70 text-sm mb-2 leading-relaxed">
+              {sessionSummary || "You built an amazing world!"}
+            </p>
+            <p className="text-white/40 text-xs mb-6">
+              {canvasState.world.length} world items ·{" "}
+              {canvasState.characters.length} characters · {turn - 1} turns
+            </p>
+            <div className="flex gap-3 justify-center">
+              <button
+                onClick={handleReset}
+                className="px-6 py-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-bold rounded-2xl hover:scale-105 transition-transform shadow-lg"
+              >
+                Build New World
+              </button>
+              <button
+                onClick={handleGenreSwitch}
+                className="px-6 py-3 bg-white/10 border border-white/20 text-white font-bold rounded-2xl hover:bg-white/20 transition-colors"
+              >
+                Switch Genre
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
     );
   }
 
@@ -181,6 +283,9 @@ export default function Home() {
           </h1>
           <span className="bg-gradient-to-r from-purple-100 to-pink-100 text-purple-700 px-3 py-1 rounded-full text-xs font-bold">
             {genre}
+          </span>
+          <span className="text-gray-300 text-xs font-semibold">
+            {turn}/{MAX_TURNS}
           </span>
         </div>
         <div className="flex items-center gap-4">
@@ -201,7 +306,7 @@ export default function Home() {
 
       {/* Split Screen */}
       <main className="flex-1 flex gap-4 p-4 overflow-hidden">
-        {/* LEFT: Creation Canvas */}
+        {/* LEFT: 3D Creation Canvas */}
         <div className="flex-1 min-w-0">
           <CreationCanvas
             canvasState={canvasState}
@@ -209,6 +314,8 @@ export default function Home() {
             narration={narration}
             preferences={preferences}
             sessionSummary={sessionSummary}
+            lastSelectedBlock={lastSelectedBlock}
+            showConfetti={false}
           />
         </div>
 
