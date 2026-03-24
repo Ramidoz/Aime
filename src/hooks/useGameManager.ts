@@ -1,84 +1,146 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { CanvasState, Genre, GameObjective } from "@/types";
 import { ELEMENT_REGISTRY } from "@/game/registry";
-import { PlacedElement, LevelLayout } from "@/game/levelDesigner";
+import { PlacedElement } from "@/game/levelDesigner";
 import { interpretCanvasState } from "@/game/interpreter";
 import {
+  GameState,
+  GamePhase,
+  GAME_CONSTANTS,
+  createInitialGameState,
+  calculateFinalScore,
+} from "@/game/GameState";
+import {
   playSoundEffect,
+  playObstacleHit,
+  playTimerTick,
+  playLoseSound,
+  playComboUp,
+  playGoalFanfare,
   triggerScreenShake,
   createScorePopup,
   ScorePopup,
 } from "@/game/feedback";
 
 export function useGameManager(canvasState: CanvasState, genre: Genre) {
-  const [layout, setLayout] = useState<LevelLayout | null>(null);
   const [elements, setElements] = useState<PlacedElement[]>([]);
-  const [objective, setObjective] = useState<GameObjective>({
-    type: "collect",
-    label: "Collect all items",
-    total: 0,
-    current: 0,
-  });
-  const [score, setScore] = useState(0);
-  const [boosted, setBoosted] = useState(false);
-  const [gameWon, setGameWon] = useState(false);
+  const [gameState, setGameState] = useState<GameState>(createInitialGameState(0));
   const [scorePopups, setScorePopups] = useState<ScorePopup[]>([]);
   const [collectEffects, setCollectEffects] = useState<
     { id: number; position: [number, number, number]; color: string }[]
   >([]);
+  const [stunActive, setStunActive] = useState(false);
+  const [countdownNumber, setCountdownNumber] = useState(3);
+
   const boostTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const goalReadyRef = useRef(false);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastTickSoundRef = useRef(0);
+  const gameStateRef = useRef(gameState);
 
-  const initGame = useCallback(() => {
-    const levelLayout = interpretCanvasState(canvasState, genre);
-    setLayout(levelLayout);
-    setElements(levelLayout.elements);
-    setScore(0);
-    setBoosted(false);
-    setGameWon(false);
-    setScorePopups([]);
-    setCollectEffects([]);
-    goalReadyRef.current = false;
+  // Keep ref in sync
+  useEffect(() => {
+    gameStateRef.current = gameState;
+  }, [gameState]);
 
-    // Count objectives
-    const objectiveEls = levelLayout.elements.filter(
-      (e) => ELEMENT_REGISTRY[e.type].isObjective
-    );
-
-    const hasNpcs = objectiveEls.some((e) => e.type === "friendly_npc");
-    const hasCheckpoints = objectiveEls.some((e) => e.type === "checkpoint");
-
-    let label = "Collect everything, then reach the goal!";
-    let type: "collect" | "racing" | "interact" = "collect";
-
-    if (genre === "Pets" || (hasNpcs && !hasCheckpoints)) {
-      label = "Meet all friends, then reach the goal!";
-      type = "interact";
-    } else if (genre === "Racing" || hasCheckpoints) {
-      label = "Pass all checkpoints to the finish!";
-      type = "racing";
+  // ─── Timer logic ───
+  useEffect(() => {
+    if (gameState.phase !== "playing") {
+      if (timerRef.current) clearInterval(timerRef.current);
+      return;
     }
 
-    setObjective({
-      type,
-      label,
-      total: objectiveEls.length,
-      current: 0,
-    });
+    timerRef.current = setInterval(() => {
+      setGameState((prev) => {
+        if (prev.phase !== "playing") return prev;
+
+        const newTimer = Math.max(0, prev.timer - 0.1);
+
+        // Tick sound for low time
+        const now = Date.now();
+        const secondsLeft = Math.ceil(newTimer);
+        if (
+          secondsLeft <= GAME_CONSTANTS.LOW_TIME_THRESHOLD &&
+          secondsLeft > 0 &&
+          now - lastTickSoundRef.current > 900
+        ) {
+          playTimerTick(secondsLeft);
+          lastTickSoundRef.current = now;
+        }
+
+        // Check combo timeout
+        let combo = prev.combo;
+        if (
+          prev.combo > 1 &&
+          now - prev.lastCollectTime > GAME_CONSTANTS.COMBO_WINDOW * 1000
+        ) {
+          combo = 1;
+        }
+
+        // Time's up
+        if (newTimer <= 0) {
+          playLoseSound();
+          return { ...prev, timer: 0, combo, phase: "lost" as GamePhase };
+        }
+
+        return { ...prev, timer: newTimer, combo };
+      });
+    }, 100);
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [gameState.phase]);
+
+  // ─── Countdown logic ───
+  useEffect(() => {
+    if (gameState.phase !== "countdown") return;
+
+    setCountdownNumber(3);
+    let count = 3;
+    const interval = setInterval(() => {
+      count--;
+      if (count <= 0) {
+        clearInterval(interval);
+        setGameState((prev) => ({ ...prev, phase: "playing" }));
+        setCountdownNumber(0);
+      } else {
+        setCountdownNumber(count);
+      }
+    }, 800);
+
+    return () => clearInterval(interval);
+  }, [gameState.phase]);
+
+  // ─── Initialize game ───
+  const initGame = useCallback(() => {
+    const layout = interpretCanvasState(canvasState, genre);
+    setElements(layout.elements);
+    setScorePopups([]);
+    setCollectEffects([]);
+    setStunActive(false);
+
+    const objectiveCount = layout.elements.filter(
+      (e) => ELEMENT_REGISTRY[e.type].isObjective
+    ).length;
+
+    setGameState(createInitialGameState(objectiveCount));
   }, [canvasState, genre]);
 
   const removeCollectEffect = useCallback((id: number) => {
     setCollectEffects((prev) => prev.filter((e) => e.id !== id));
   }, []);
 
+  // ─── Collision check (called every frame by PlayerController) ───
   const checkCollisions = useCallback(
     (playerPos: [number, number, number]) => {
-      if (gameWon) return;
+      const gs = gameStateRef.current;
+      if (gs.phase !== "playing" || gs.stunUntil > Date.now()) return;
 
       setElements((prev) => {
         let changed = false;
+        const now = Date.now();
         const next = prev.map((el) => {
           if (el.collected) return el;
 
@@ -87,89 +149,165 @@ export function useGameManager(canvasState: CanvasState, genre: Genre) {
           const dz = playerPos[2] - el.position[2];
           const dist = Math.sqrt(dx * dx + dz * dz);
 
-          if (dist < def.interactionRadius) {
-            // Goal zone — only activate when all objectives done
-            if (el.type === "goal_zone") {
-              if (!goalReadyRef.current) return el;
-              // Player reached goal!
-              changed = true;
-              playSoundEffect(def.sound);
-              setGameWon(true);
-              setScore((s) => s + def.scoreValue);
-              setScorePopups((p) => [...p, createScorePopup(def.scoreValue)]);
-              setCollectEffects((p) => [
-                ...p,
-                { id: Date.now(), position: el.position, color: def.color },
-              ]);
-              return { ...el, collected: true };
-            }
+          if (dist >= def.interactionRadius) return el;
 
+          // ── Goal zone ──
+          if (el.type === "goal_zone") {
+            if (!gs.goalReady) return el;
+            changed = true;
+            playGoalFanfare();
+            const finalState = { ...gs, phase: "won" as GamePhase };
+            const scores = calculateFinalScore(finalState);
+            setGameState((prev) => ({
+              ...prev,
+              phase: "won",
+              score: scores.total,
+              highScore: Math.max(prev.highScore, scores.total),
+            }));
+            setCollectEffects((p) => [
+              ...p,
+              { id: now, position: el.position, color: def.color },
+            ]);
+            return { ...el, collected: true };
+          }
+
+          // ── Obstacles: penalty ──
+          if (def.category === "hazard") {
+            changed = true;
+            playObstacleHit();
+            triggerScreenShake(8, 300);
+
+            // Time penalty + stun + combo reset
+            setGameState((prev) => ({
+              ...prev,
+              timer: Math.max(0, prev.timer - GAME_CONSTANTS.OBSTACLE_TIME_PENALTY),
+              combo: 1,
+              stunUntil: now + GAME_CONSTANTS.STUN_DURATION * 1000,
+            }));
+            setStunActive(true);
+            setTimeout(() => setStunActive(false), GAME_CONSTANTS.STUN_DURATION * 1000);
+
+            setScorePopups((p) => [
+              ...p,
+              createScorePopup(`-${GAME_CONSTANTS.OBSTACLE_TIME_PENALTY}s`, "#FF4444"),
+            ]);
+
+            // Obstacles don't get consumed — you can hit them again
+            return el;
+          }
+
+          // ── Speed boost ──
+          if (el.type === "speed_boost") {
             changed = true;
             playSoundEffect(def.sound);
+            setCollectEffects((p) => [
+              ...p,
+              { id: now + Math.random(), position: [...el.position] as [number, number, number], color: def.color },
+            ]);
 
-            // Score
-            if (def.scoreValue > 0) {
-              setScore((s) => s + def.scoreValue);
-              setScorePopups((p) => [...p, createScorePopup(def.scoreValue)]);
+            setGameState((prev) => ({ ...prev, boosted: true } as GameState & { boosted: boolean }));
+            if (boostTimerRef.current) clearTimeout(boostTimerRef.current);
+            boostTimerRef.current = setTimeout(() => {
+              setGameState((prev) => ({ ...prev, boosted: false } as GameState & { boosted: boolean }));
+            }, 3000);
+
+            return { ...el, collected: true };
+          }
+
+          // ── Objective items (star, coin, gem, npc, checkpoint) ──
+          if (def.isObjective || def.scoreValue > 0) {
+            changed = true;
+
+            // Combo logic
+            const timeSinceLast = now - gs.lastCollectTime;
+            let newCombo = gs.combo;
+            if (timeSinceLast < GAME_CONSTANTS.COMBO_WINDOW * 1000 && gs.lastCollectTime > 0) {
+              newCombo = gs.combo + 1;
+              playComboUp(newCombo);
+            } else {
+              newCombo = 1;
             }
 
-            // Particle effect
+            const scoreGain = def.scoreValue * newCombo;
+            playSoundEffect(def.sound, newCombo);
+
             if (def.particle !== "none") {
               setCollectEffects((p) => [
                 ...p,
-                { id: Date.now() + Math.random(), position: [...el.position] as [number, number, number], color: def.color },
+                { id: now + Math.random(), position: [...el.position] as [number, number, number], color: def.color },
               ]);
             }
 
-            // Speed boost
-            if (el.type === "speed_boost") {
-              setBoosted(true);
-              if (boostTimerRef.current) clearTimeout(boostTimerRef.current);
-              boostTimerRef.current = setTimeout(() => setBoosted(false), 3000);
+            // Score popup
+            let popupText = `+${scoreGain}`;
+            if (newCombo > 1) popupText += ` x${newCombo}`;
+            setScorePopups((p) => [...p, createScorePopup(popupText)]);
+
+            // Time bonus popup
+            if (def.isObjective) {
+              setTimeout(() => {
+                setScorePopups((p) => [
+                  ...p,
+                  createScorePopup(`+${GAME_CONSTANTS.COLLECT_TIME_BONUS}s`, "#44FF88"),
+                ]);
+              }, 200);
             }
 
-            // Screen shake for obstacles
-            if (def.category === "hazard") {
-              triggerScreenShake(3, 150);
-            }
+            triggerScreenShake(2, 100);
 
-            if (def.consumeOnTouch || def.isObjective) {
-              return { ...el, collected: true };
-            }
+            const newCollected = def.isObjective
+              ? gs.objectivesCollected + 1
+              : gs.objectivesCollected;
+
+            setGameState((prev) => ({
+              ...prev,
+              score: prev.score + scoreGain,
+              combo: newCombo,
+              maxCombo: Math.max(prev.maxCombo, newCombo),
+              lastCollectTime: now,
+              timer: def.isObjective
+                ? prev.timer + GAME_CONSTANTS.COLLECT_TIME_BONUS
+                : prev.timer,
+              objectivesCollected: newCollected,
+              goalReady: newCollected >= prev.objectivesTotal,
+            }));
+
+            return def.consumeOnTouch || def.isObjective
+              ? { ...el, collected: true }
+              : el;
           }
+
           return el;
         });
-
-        if (changed) {
-          // Recount objective progress
-          const objectiveCount = next.filter(
-            (e) => ELEMENT_REGISTRY[e.type].isObjective && e.collected
-          ).length;
-
-          setObjective((prev) => {
-            const updated = { ...prev, current: objectiveCount };
-            if (objectiveCount >= prev.total) {
-              goalReadyRef.current = true;
-            }
-            return updated;
-          });
-        }
 
         return changed ? next : prev;
       });
     },
-    [gameWon]
+    []
   );
 
+  // Derive values for external consumers
+  const objective: GameObjective = {
+    type: genre === "Racing" ? "racing" : genre === "Pets" ? "interact" : "collect",
+    label: gameState.goalReady ? "Reach the goal!" : `Collect all items`,
+    total: gameState.objectivesTotal,
+    current: gameState.objectivesCollected,
+  };
+
+  const boosted = (gameState as GameState & { boosted?: boolean }).boosted || false;
+
   return {
-    layout,
     elements,
+    gameState,
     objective,
-    score,
+    score: gameState.score,
     boosted,
-    gameWon,
+    gameWon: gameState.phase === "won",
+    gameLost: gameState.phase === "lost",
     scorePopups,
     collectEffects,
+    stunActive,
+    countdownNumber,
     initGame,
     checkCollisions,
     removeCollectEffect,

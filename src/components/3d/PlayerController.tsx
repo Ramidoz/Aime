@@ -9,13 +9,15 @@ interface PlayerControllerProps {
   onPositionUpdate: (state: PlayerState) => void;
   onCollision: (position: [number, number, number]) => void;
   boosted: boolean;
+  stunned: boolean;
   genre: string;
 }
 
 const BASE_SPEED = 0.08;
-const BOOST_MULTIPLIER = 2.0;
-const ROTATION_SPEED = 0.04;
-const BOUNDS = 18; // Keep player within ground plane
+const BOOST_MULTIPLIER = 2.2;
+const ROTATION_SPEED = 0.045;
+const BOUNDS = 18;
+const MOMENTUM_DECAY = 0.92; // Smooths start/stop
 
 const GENRE_COLORS: Record<string, string> = {
   Racing: "#ff4400",
@@ -30,10 +32,13 @@ export default function PlayerController({
   onPositionUpdate,
   onCollision,
   boosted,
+  stunned,
   genre,
 }: PlayerControllerProps) {
-  const meshRef = useRef<THREE.Mesh>(null);
+  const groupRef = useRef<THREE.Group>(null);
+  const bodyRef = useRef<THREE.Mesh>(null);
   const keysRef = useRef<Set<string>>(new Set());
+  const velocityRef = useRef({ forward: 0, strafe: 0 });
   const stateRef = useRef<PlayerState>({
     position: [0, 0.3, 8],
     rotation: 0,
@@ -59,48 +64,72 @@ export default function PlayerController({
   }, [handleKeyDown, handleKeyUp]);
 
   useFrame((state) => {
-    if (!meshRef.current) return;
-
+    if (!groupRef.current) return;
     const keys = keysRef.current;
     const s = stateRef.current;
-    const speed = boosted ? BASE_SPEED * BOOST_MULTIPLIER : BASE_SPEED;
+    const v = velocityRef.current;
+    const t = state.clock.elapsedTime;
 
-    // Rotation (A/D or Left/Right)
-    if (keys.has("a") || keys.has("arrowleft")) {
-      s.rotation += ROTATION_SPEED;
-    }
-    if (keys.has("d") || keys.has("arrowright")) {
-      s.rotation -= ROTATION_SPEED;
-    }
-
-    // Movement (W/S or Up/Down)
-    let moving = false;
-    if (keys.has("w") || keys.has("arrowup")) {
-      s.position[0] -= Math.sin(s.rotation) * speed;
-      s.position[2] -= Math.cos(s.rotation) * speed;
-      moving = true;
-    }
-    if (keys.has("s") || keys.has("arrowdown")) {
-      s.position[0] += Math.sin(s.rotation) * speed * 0.6;
-      s.position[2] += Math.cos(s.rotation) * speed * 0.6;
-      moving = true;
+    // ─── Stun: flash red, can't move ───
+    if (stunned) {
+      if (bodyRef.current) {
+        const mat = bodyRef.current.material as THREE.MeshStandardMaterial;
+        mat.emissiveIntensity = Math.sin(t * 20) > 0 ? 1.5 : 0.2;
+        mat.emissive.set("#ff0000");
+      }
+      groupRef.current.position.set(s.position[0], s.position[1], s.position[2]);
+      groupRef.current.rotation.y = s.rotation;
+      return;
     }
 
-    // Clamp to bounds
+    // Reset emissive after stun
+    if (bodyRef.current) {
+      const mat = bodyRef.current.material as THREE.MeshStandardMaterial;
+      const color = GENRE_COLORS[genre] || "#ff4400";
+      mat.emissive.set(color);
+      mat.emissiveIntensity = boosted ? 0.8 : 0.3;
+    }
+
+    const maxSpeed = boosted ? BASE_SPEED * BOOST_MULTIPLIER : BASE_SPEED;
+
+    // Rotation
+    if (keys.has("a") || keys.has("arrowleft")) s.rotation += ROTATION_SPEED;
+    if (keys.has("d") || keys.has("arrowright")) s.rotation -= ROTATION_SPEED;
+
+    // Acceleration with momentum
+    let targetForward = 0;
+    if (keys.has("w") || keys.has("arrowup")) targetForward = -maxSpeed;
+    if (keys.has("s") || keys.has("arrowdown")) targetForward = maxSpeed * 0.5;
+
+    v.forward += (targetForward - v.forward) * (1 - MOMENTUM_DECAY);
+
+    // Apply velocity
+    s.position[0] += Math.sin(s.rotation) * v.forward;
+    s.position[2] += Math.cos(s.rotation) * v.forward;
+
+    // Bounds
     s.position[0] = Math.max(-BOUNDS, Math.min(BOUNDS, s.position[0]));
     s.position[2] = Math.max(-BOUNDS, Math.min(BOUNDS, s.position[2]));
 
-    s.speed = moving ? speed : 0;
+    const moving = Math.abs(v.forward) > 0.005;
+    s.speed = Math.abs(v.forward);
     s.boosted = boosted;
 
-    // Apply to mesh
-    meshRef.current.position.set(s.position[0], s.position[1], s.position[2]);
-    meshRef.current.rotation.y = s.rotation;
+    // Apply to group
+    groupRef.current.position.set(s.position[0], s.position[1], s.position[2]);
+    groupRef.current.rotation.y = s.rotation;
 
-    // Bobbing animation when moving
+    // Squash/stretch based on speed
+    const stretch = 1 + s.speed * 3;
+    const squash = 1 / Math.sqrt(stretch);
+    groupRef.current.scale.set(squash, stretch, squash);
+
+    // Bob when moving
     if (moving) {
-      meshRef.current.position.y =
-        0.3 + Math.sin(state.clock.elapsedTime * 8) * 0.05;
+      groupRef.current.position.y = 0.3 + Math.sin(t * 10) * 0.04;
+    } else {
+      // Idle gentle bounce
+      groupRef.current.position.y = 0.3 + Math.sin(t * 2) * 0.02;
     }
 
     onPositionUpdate({ ...s, position: [...s.position] as [number, number, number] });
@@ -110,35 +139,35 @@ export default function PlayerController({
   const color = GENRE_COLORS[genre] || "#ff4400";
 
   return (
-    <group>
-      <mesh ref={meshRef} position={[0, 0.3, 8]} castShadow>
-        {/* Player body - small arrow/wedge shape */}
-        <coneGeometry args={[0.3, 0.6, 4]} />
+    <group ref={groupRef} position={[0, 0.3, 8]}>
+      {/* Body */}
+      <mesh ref={bodyRef} castShadow rotation={[Math.PI, 0, 0]}>
+        <coneGeometry args={[0.25, 0.55, 6]} />
         <meshStandardMaterial
           color={color}
           emissive={color}
-          emissiveIntensity={boosted ? 0.8 : 0.3}
+          emissiveIntensity={0.3}
           roughness={0.3}
           metalness={0.6}
         />
       </mesh>
-      {/* Direction indicator - small sphere at front */}
-      {meshRef.current && (
-        <mesh
-          position={[
-            meshRef.current.position.x - Math.sin(stateRef.current.rotation) * 0.4,
-            0.5,
-            meshRef.current.position.z - Math.cos(stateRef.current.rotation) * 0.4,
-          ]}
-        >
-          <sphereGeometry args={[0.08, 8, 8]} />
-          <meshStandardMaterial
-            color="#ffffff"
-            emissive="#ffffff"
-            emissiveIntensity={0.8}
-          />
-        </mesh>
-      )}
+      {/* Eyes */}
+      <mesh position={[-0.08, 0.05, -0.2]}>
+        <sphereGeometry args={[0.06, 8, 8]} />
+        <meshStandardMaterial color="#ffffff" roughness={0.9} />
+      </mesh>
+      <mesh position={[-0.08, 0.05, -0.22]}>
+        <sphereGeometry args={[0.03, 6, 6]} />
+        <meshStandardMaterial color="#111111" />
+      </mesh>
+      <mesh position={[0.08, 0.05, -0.2]}>
+        <sphereGeometry args={[0.06, 8, 8]} />
+        <meshStandardMaterial color="#ffffff" roughness={0.9} />
+      </mesh>
+      <mesh position={[0.08, 0.05, -0.22]}>
+        <sphereGeometry args={[0.03, 6, 6]} />
+        <meshStandardMaterial color="#111111" />
+      </mesh>
     </group>
   );
 }

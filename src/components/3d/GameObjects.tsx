@@ -2,9 +2,8 @@
 
 import { useRef } from "react";
 import { useFrame } from "@react-three/fiber";
-import { Text } from "@react-three/drei";
 import * as THREE from "three";
-import { ELEMENT_REGISTRY, ElementType } from "@/game/registry";
+import { ELEMENT_REGISTRY } from "@/game/registry";
 import { PlacedElement } from "@/game/levelDesigner";
 import StarMesh from "./meshes/StarMesh";
 import CoinMesh from "./meshes/CoinMesh";
@@ -19,86 +18,90 @@ import PortalMesh from "./meshes/PortalMesh";
 
 interface GameObjectsProps {
   elements: PlacedElement[];
+  goalReady: boolean;
+  playerPosition: [number, number, number];
 }
 
-function GameElement({ element }: { element: PlacedElement }) {
+function GameElement({
+  element,
+  goalReady,
+  playerPosition,
+}: {
+  element: PlacedElement;
+  goalReady: boolean;
+  playerPosition: [number, number, number];
+}) {
   const groupRef = useRef<THREE.Group>(null);
+  const glowRef = useRef<THREE.Mesh>(null);
   const def = ELEMENT_REGISTRY[element.type];
 
   useFrame((state) => {
-    if (!groupRef.current || element.collected) return;
-    // Glow ring pulse
-    const ring = groupRef.current.children.find(
-      (c) => c.userData.isGlowRing
-    ) as THREE.Mesh | undefined;
-    if (ring) {
-      const mat = ring.material as THREE.MeshBasicMaterial;
-      mat.opacity = 0.15 + Math.sin(state.clock.elapsedTime * 2) * 0.1;
+    if (!groupRef.current) return;
+    const t = state.clock.elapsedTime;
+
+    // Proximity glow — brighter as player gets closer
+    if (glowRef.current && !element.collected) {
+      const dx = playerPosition[0] - element.position[0];
+      const dz = playerPosition[2] - element.position[2];
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      const proximity = Math.max(0, 1 - dist / (def.interactionRadius * 3));
+      const mat = glowRef.current.material as THREE.MeshBasicMaterial;
+      mat.opacity = 0.1 + proximity * 0.35 + Math.sin(t * 2) * 0.05;
+
+      // Scale glow ring with proximity
+      const glowScale = 1 + proximity * 0.3;
+      glowRef.current.scale.set(glowScale, glowScale, 1);
     }
   });
 
+  // Consumed items disappear
   if (element.collected && def.consumeOnTouch) return null;
-  // For NPCs that have been "met" — show dimmed
+
+  // Met NPCs show dimmed
   if (element.collected && !def.consumeOnTouch && element.type !== "goal_zone") {
     return (
       <group position={element.position}>
         <mesh>
-          <sphereGeometry args={[0.2, 8, 8]} />
-          <meshBasicMaterial color={def.color} transparent opacity={0.2} />
+          <sphereGeometry args={[0.15, 8, 8]} />
+          <meshBasicMaterial color={def.color} transparent opacity={0.15} />
         </mesh>
       </group>
     );
   }
+
+  // Goal zone: locked vs unlocked
+  const isGoal = element.type === "goal_zone";
+  const goalColor = isGoal && goalReady ? "#44FF88" : isGoal ? "#444444" : def.color;
+  const goalEmissive = isGoal && goalReady ? "#00FF55" : isGoal ? "#222222" : def.emissive;
+  const goalIntensity = isGoal && goalReady ? 1.2 : isGoal ? 0.1 : def.emissiveIntensity;
 
   const MeshComponent = getMeshComponent(def.mesh);
 
   return (
     <group ref={groupRef} position={element.position}>
       <MeshComponent
-        color={def.color}
-        emissive={def.emissive}
-        emissiveIntensity={def.emissiveIntensity}
+        color={goalColor}
+        emissive={goalEmissive}
+        emissiveIntensity={goalIntensity}
       />
-      {/* Label */}
-      {element.label && element.type !== "goal_zone" && (
-        <Text
-          position={[0, 0.85, 0]}
-          fontSize={0.14}
-          color="white"
-          anchorX="center"
-          anchorY="bottom"
-          outlineWidth={0.02}
-          outlineColor="#000000"
-          maxWidth={2}
-        >
-          {element.label}
-        </Text>
+      {/* Goal locked indicator */}
+      {isGoal && !goalReady && (
+        <mesh position={[0, 1.8, 0]}>
+          <sphereGeometry args={[0.12, 8, 8]} />
+          <meshStandardMaterial color="#666666" emissive="#333333" emissiveIntensity={0.3} />
+        </mesh>
       )}
-      {element.type === "goal_zone" && (
-        <Text
-          position={[0, 2.0, 0]}
-          fontSize={0.22}
-          color="#FFD700"
-          anchorX="center"
-          anchorY="bottom"
-          outlineWidth={0.03}
-          outlineColor="#000000"
-          font={undefined}
-        >
-          GOAL
-        </Text>
-      )}
-      {/* Ground glow ring */}
+      {/* Ground glow ring — reacts to player proximity */}
       <mesh
+        ref={glowRef}
         rotation={[-Math.PI / 2, 0, 0]}
         position={[0, -element.position[1] + 0.02, 0]}
-        userData={{ isGlowRing: true }}
       >
-        <ringGeometry args={[def.interactionRadius * 0.4, def.interactionRadius * 0.6, 20]} />
+        <ringGeometry args={[def.interactionRadius * 0.4, def.interactionRadius * 0.65, 24]} />
         <meshBasicMaterial
-          color={def.color}
+          color={goalColor}
           transparent
-          opacity={0.2}
+          opacity={0.15}
           side={THREE.DoubleSide}
         />
       </mesh>
@@ -122,11 +125,16 @@ function getMeshComponent(mesh: string) {
   }
 }
 
-export default function GameObjects({ elements }: GameObjectsProps) {
+export default function GameObjects({ elements, goalReady, playerPosition }: GameObjectsProps) {
   return (
     <>
       {elements.map((el) => (
-        <GameElement key={el.id} element={el} />
+        <GameElement
+          key={el.id}
+          element={el}
+          goalReady={goalReady}
+          playerPosition={playerPosition}
+        />
       ))}
     </>
   );

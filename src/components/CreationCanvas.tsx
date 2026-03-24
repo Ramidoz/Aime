@@ -17,13 +17,16 @@ interface CreationCanvasProps {
   sessionSummary: string;
   lastSelectedBlock: Block | null;
   showConfetti: boolean;
-  // Play mode
   playMode?: boolean;
   gameElements?: PlacedElement[];
   objective?: GameObjective;
   score?: number;
+  timer?: number;
+  combo?: number;
   boosted?: boolean;
-  gameWon?: boolean;
+  stunned?: boolean;
+  gamePhase?: string;
+  goalReady?: boolean;
   scorePopups?: ScorePopup[];
   collectEffects?: { id: number; position: [number, number, number]; color: string }[];
   onRemoveCollectEffect?: (id: number) => void;
@@ -31,6 +34,7 @@ interface CreationCanvasProps {
   onCollision?: (position: [number, number, number]) => void;
   onPlayNow?: () => void;
   showPlayButton?: boolean;
+  countdownNumber?: number;
 }
 
 const GENRE_GRADIENTS: Record<string, string> = {
@@ -62,81 +66,55 @@ function useStyleEffects(preferences: UserPreferences) {
 }
 
 export default function CreationCanvas({
-  canvasState,
-  genre,
-  narration,
-  preferences,
-  sessionSummary,
-  lastSelectedBlock,
-  showConfetti,
-  playMode = false,
-  gameElements = [],
-  objective,
-  score = 0,
-  boosted = false,
-  gameWon = false,
-  scorePopups = [],
-  collectEffects = [],
-  onRemoveCollectEffect,
-  onPlayerUpdate,
-  onCollision,
-  onPlayNow,
-  showPlayButton = false,
+  canvasState, genre, narration, preferences, sessionSummary,
+  lastSelectedBlock, showConfetti,
+  playMode = false, gameElements = [], objective, score = 0,
+  timer = 45, combo = 1, boosted = false, stunned = false,
+  gamePhase = "playing", goalReady = false,
+  scorePopups = [], collectEffects = [],
+  onRemoveCollectEffect, onPlayerUpdate, onCollision,
+  onPlayNow, showPlayButton = false, countdownNumber = 3,
 }: CreationCanvasProps) {
   const gradient = GENRE_GRADIENTS[genre] || GENRE_GRADIENTS.Space;
   const isEmpty = canvasState.world.length === 0 && canvasState.characters.length === 0;
   const style = useStyleEffects(preferences);
 
   return (
-    <div
-      className={`h-full bg-gradient-to-b ${gradient} ${style.hasCute ? "rounded-3xl" : "rounded-2xl"} overflow-hidden relative`}
-    >
-      {/* 3D Scene */}
+    <div className={`h-full bg-gradient-to-b ${gradient} ${style.hasCute ? "rounded-3xl" : "rounded-2xl"} overflow-hidden relative`}>
       <div className="absolute inset-0">
         <ErrorBoundary>
           <Suspense
-            fallback={
-              <div className="flex items-center justify-center h-full">
-                <div className="text-white/30 text-sm animate-pulse">Loading 3D world...</div>
-              </div>
-            }
+            fallback={<div className="flex items-center justify-center h-full"><div className="text-white/30 text-sm animate-pulse">Loading 3D world...</div></div>}
           >
             <WorldScene
-              canvasState={canvasState}
-              genre={genre}
-              preferences={preferences}
-              lastSelectedBlock={lastSelectedBlock}
-              showConfetti={showConfetti}
-              playMode={playMode}
-              gameElements={gameElements}
-              boosted={boosted}
-              gameWon={gameWon}
+              canvasState={canvasState} genre={genre} preferences={preferences}
+              lastSelectedBlock={lastSelectedBlock} showConfetti={showConfetti}
+              playMode={playMode} gameElements={gameElements}
+              boosted={boosted} stunned={stunned}
+              gamePhase={gamePhase} goalReady={goalReady}
               collectEffects={collectEffects}
               onRemoveCollectEffect={onRemoveCollectEffect}
-              onPlayerUpdate={onPlayerUpdate}
-              onCollision={onCollision}
+              onPlayerUpdate={onPlayerUpdate} onCollision={onCollision}
             />
           </Suspense>
         </ErrorBoundary>
       </div>
 
-      {/* Game HUD — play mode only */}
+      {/* Game HUD */}
       {playMode && objective && (
         <GameHUD
-          objective={objective}
-          score={score}
-          boosted={boosted}
-          scorePopups={scorePopups}
+          objective={objective} score={score} timer={timer}
+          combo={combo} boosted={boosted} goalReady={goalReady}
+          scorePopups={scorePopups} gamePhase={gamePhase}
+          countdownNumber={countdownNumber}
         />
       )}
 
-      {/* Build mode UI overlay */}
+      {/* Build mode UI */}
       {!playMode && (
         <div className="relative z-10 flex flex-col h-full p-6 pointer-events-none">
           <div className="mb-4 pointer-events-auto">
-            <h2 className={`text-2xl font-extrabold text-white/90 mb-1 drop-shadow-lg ${style.hasCute ? "tracking-wide" : ""}`}>
-              Your World
-            </h2>
+            <h2 className={`text-2xl font-extrabold text-white/90 mb-1 drop-shadow-lg ${style.hasCute ? "tracking-wide" : ""}`}>Your World</h2>
             <div className="h-0.5 w-16 bg-gradient-to-r from-purple-400 to-pink-400 rounded-full" />
           </div>
 
@@ -148,9 +126,7 @@ export default function CreationCanvas({
 
           {sessionSummary && (
             <div className="mb-4 px-3 py-2 bg-black/30 backdrop-blur-sm rounded-lg border border-white/5 pointer-events-auto">
-              <p className="text-white/40 text-xs">
-                <span className="font-bold text-white/50">Story so far:</span> {sessionSummary}
-              </p>
+              <p className="text-white/40 text-xs"><span className="font-bold text-white/50">Story so far:</span> {sessionSummary}</p>
             </div>
           )}
 
@@ -158,12 +134,9 @@ export default function CreationCanvas({
 
           {showPlayButton && (
             <div className="flex justify-center mb-6 pointer-events-auto animate-slide-up">
-              <button
-                onClick={onPlayNow}
-                className="group px-10 py-5 bg-gradient-to-r from-green-500 to-emerald-500 text-white font-extrabold text-xl rounded-2xl hover:scale-110 active:scale-95 transition-all shadow-xl shadow-green-500/40 border border-green-400/30"
-              >
-                <span className="mr-2">🎮</span>
-                Play Now!
+              <button onClick={onPlayNow}
+                className="group px-10 py-5 bg-gradient-to-r from-green-500 to-emerald-500 text-white font-extrabold text-xl rounded-2xl hover:scale-110 active:scale-95 transition-all shadow-xl shadow-green-500/40 border border-green-400/30">
+                🎮 Play Now!
               </button>
             </div>
           )}
@@ -178,19 +151,11 @@ export default function CreationCanvas({
             <div className="pointer-events-auto">
               <div className="bg-black/40 backdrop-blur-md rounded-xl p-3 border border-white/10">
                 <div className="flex flex-wrap gap-1.5 items-center">
-                  {canvasState.world.map((item, i) => (
-                    <Tag key={`w-${i}`} label={item} colorIdx={i} cute={style.hasCute} icon="🌍" />
-                  ))}
-                  {canvasState.characters.map((item, i) => (
-                    <Tag key={`c-${i}`} label={item} colorIdx={i + 2} cute={style.hasCute} icon="👾" />
-                  ))}
-                  {canvasState.theme.map((item, i) => (
-                    <Tag key={`t-${i}`} label={item} colorIdx={i + 4} cute={style.hasCute} icon="🎨" />
-                  ))}
+                  {canvasState.world.map((item, i) => <Tag key={`w-${i}`} label={item} colorIdx={i} cute={style.hasCute} icon="🌍" />)}
+                  {canvasState.characters.map((item, i) => <Tag key={`c-${i}`} label={item} colorIdx={i + 2} cute={style.hasCute} icon="👾" />)}
+                  {canvasState.theme.map((item, i) => <Tag key={`t-${i}`} label={item} colorIdx={i + 4} cute={style.hasCute} icon="🎨" />)}
                   {canvasState.mood.length > 0 && (
-                    <span className="text-white/50 text-xs font-semibold capitalize ml-1">
-                      💫 {canvasState.mood[canvasState.mood.length - 1]}
-                    </span>
+                    <span className="text-white/50 text-xs font-semibold capitalize ml-1">💫 {canvasState.mood[canvasState.mood.length - 1]}</span>
                   )}
                 </div>
                 <div className="mt-2 flex gap-4 text-white/30 text-xs">
@@ -210,8 +175,7 @@ function Tag({ label, colorIdx, cute, icon }: { label: string; colorIdx: number;
   const color = TAG_COLORS[colorIdx % TAG_COLORS.length];
   return (
     <span className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold border ${color} capitalize ${cute ? "rounded-2xl" : "rounded-full"}`}>
-      <span className="text-[10px]">{icon}</span>
-      {label}
+      <span className="text-[10px]">{icon}</span>{label}
     </span>
   );
 }
