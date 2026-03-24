@@ -219,7 +219,6 @@ export default function SceneObject({
           anchorY="bottom"
           outlineWidth={0.02}
           outlineColor="#000000"
-          font="/fonts/nunito.woff"
           maxWidth={2}
         >
           {label}

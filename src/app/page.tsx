@@ -13,6 +13,7 @@ import GenrePicker from "@/components/GenrePicker";
 import CreationCanvas from "@/components/CreationCanvas";
 import IdeasWorkshop from "@/components/IdeasWorkshop";
 import AIInsightsPanel from "@/components/AIInsightsPanel";
+import ProgressBar from "@/components/ProgressBar";
 import {
   playClickSound,
   playSuccessSound,
@@ -42,6 +43,7 @@ export default function Home() {
   const [turn, setTurn] = useState(1);
   const [pipelineStage, setPipelineStage] = useState("idle");
   const [showInsights, setShowInsights] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Session memory
   const [sessionSummary, setSessionSummary] = useState("");
@@ -51,9 +53,7 @@ export default function Home() {
   const [lastSelectedBlock, setLastSelectedBlock] = useState<Block | null>(null);
   const [showConfetti, setShowConfetti] = useState(false);
 
-  // Prevent double-clicks
   const processingRef = useRef(false);
-  // Track if audio was started (requires user interaction)
   const audioStartedRef = useRef(false);
 
   const ensureAudio = useCallback(() => {
@@ -63,15 +63,23 @@ export default function Home() {
     }
   }, []);
 
-  // Stop ambient on unmount
   useEffect(() => {
     return () => stopAmbientLoop();
   }, []);
+
+  // Auto-dismiss errors
+  useEffect(() => {
+    if (error) {
+      const timer = setTimeout(() => setError(null), 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [error]);
 
   const fetchInitialBlocks = useCallback(
     async (selectedGenre: Genre, prefs: UserPreferences, summary: string, recent: Block[]) => {
       setLoading(true);
       setPipelineStage("designing");
+      setError(null);
       try {
         const res = await fetch("/api/generate-blocks", {
           method: "POST",
@@ -84,12 +92,19 @@ export default function Home() {
             recent_blocks: recent,
           }),
         });
+        if (!res.ok) throw new Error(`API error: ${res.status}`);
         const data: BlocksResponse = await res.json();
         if (data.blocks && data.blocks.length === 3) {
           setBlocks(data.blocks);
+        } else {
+          throw new Error("Invalid block response");
         }
       } catch (err) {
-        console.error("Failed to fetch initial blocks:", err);
+        setError("Could not load ideas. Retrying...");
+        // Retry once after a short delay
+        setTimeout(() => {
+          fetchInitialBlocks(selectedGenre, prefs, summary, recent);
+        }, 2000);
       } finally {
         setPipelineStage("idle");
         setLoading(false);
@@ -105,6 +120,7 @@ export default function Home() {
       setGenre(selectedGenre);
       setScreen("game");
       setShowConfetti(false);
+      setError(null);
       const freshCanvas: CanvasState = { world: [], characters: [], theme: [], mood: [] };
       setCanvasState(freshCanvas);
       setNarration("");
@@ -126,15 +142,16 @@ export default function Home() {
       if (!genre || loading || processingRef.current) return;
       processingRef.current = true;
       setLoading(true);
+      setError(null);
       ensureAudio();
       playSpawnSound();
 
       try {
         setPipelineStage("updating-state");
-        await delay(300);
+        await delay(250);
 
         setPipelineStage("narrating");
-        await delay(200);
+        await delay(150);
 
         setPipelineStage("designing");
 
@@ -150,6 +167,8 @@ export default function Home() {
             recent_blocks: recentBlocks,
           }),
         });
+
+        if (!res.ok) throw new Error(`API error: ${res.status}`);
 
         setPipelineStage("safety-check");
 
@@ -174,7 +193,6 @@ export default function Home() {
         const nextTurn = turn + 1;
         setTurn(nextTurn);
 
-        // Check if game is complete
         if (nextTurn > MAX_TURNS) {
           setShowConfetti(true);
           setScreen("complete");
@@ -182,7 +200,7 @@ export default function Home() {
           stopAmbientLoop();
         }
       } catch (err) {
-        console.error("Failed to process interaction:", err);
+        setError("Something went wrong. Try again!");
       } finally {
         setPipelineStage("idle");
         setLoading(false);
@@ -208,6 +226,7 @@ export default function Home() {
     setShowInsights(false);
     setLastSelectedBlock(null);
     setShowConfetti(false);
+    setError(null);
   }, []);
 
   // Genre selection / switch screen
@@ -225,7 +244,6 @@ export default function Home() {
   if (screen === "complete") {
     return (
       <div className="h-screen flex flex-col">
-        {/* Full-screen 3D scene with confetti */}
         <div className="absolute inset-0">
           <CreationCanvas
             canvasState={canvasState}
@@ -238,7 +256,6 @@ export default function Home() {
           />
         </div>
 
-        {/* Completion overlay */}
         <div className="relative z-20 flex flex-col items-center justify-center h-full pointer-events-none">
           <div className="bg-black/50 backdrop-blur-lg rounded-3xl p-10 border border-white/20 text-center pointer-events-auto animate-slide-up max-w-lg">
             <div className="text-6xl mb-4">🎉</div>
@@ -272,21 +289,19 @@ export default function Home() {
     );
   }
 
-  // Main game screen - split layout
+  // Main game screen
   return (
     <div className="h-screen flex flex-col">
       {/* Top Bar */}
       <header className="flex items-center justify-between px-6 py-3 bg-white/60 backdrop-blur-sm border-b border-gray-200/50">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-4">
           <h1 className="text-xl font-extrabold bg-gradient-to-r from-purple-600 to-pink-500 bg-clip-text text-transparent">
             Creative Engine
           </h1>
           <span className="bg-gradient-to-r from-purple-100 to-pink-100 text-purple-700 px-3 py-1 rounded-full text-xs font-bold">
             {genre}
           </span>
-          <span className="text-gray-300 text-xs font-semibold">
-            {turn}/{MAX_TURNS}
-          </span>
+          <ProgressBar current={turn} max={MAX_TURNS} />
         </div>
         <div className="flex items-center gap-4">
           <button
@@ -303,6 +318,15 @@ export default function Home() {
           </button>
         </div>
       </header>
+
+      {/* Error Toast */}
+      {error && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-50 animate-slide-up">
+          <div className="bg-red-500/90 backdrop-blur-sm text-white text-sm font-semibold px-4 py-2 rounded-xl shadow-lg">
+            {error}
+          </div>
+        </div>
+      )}
 
       {/* Split Screen */}
       <main className="flex-1 flex gap-4 p-4 overflow-hidden">
@@ -321,7 +345,6 @@ export default function Home() {
 
         {/* RIGHT: Ideas Workshop + Insights */}
         <div className="w-[380px] flex-shrink-0 flex flex-col gap-3">
-          {/* AI Insights Panel */}
           <div className="flex-shrink-0">
             <AIInsightsPanel
               preferences={preferences}
@@ -331,7 +354,6 @@ export default function Home() {
             />
           </div>
 
-          {/* Ideas Workshop */}
           <div className="flex-1 min-h-0">
             <IdeasWorkshop
               blocks={blocks}

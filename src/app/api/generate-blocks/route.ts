@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(safeBlocks);
   } catch (error) {
-    console.error("generate-blocks error:", error);
+    if (process.env.NODE_ENV === "development") console.error("generate-blocks:", error);
     return NextResponse.json(
       { error: "Failed to generate blocks" },
       { status: 500 }

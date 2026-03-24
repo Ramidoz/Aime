@@ -86,7 +86,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(response);
   } catch (error) {
-    console.error("interactions error:", error);
+    if (process.env.NODE_ENV === "development") console.error("interactions:", error);
     return NextResponse.json(
       { error: "Failed to process interaction" },
       { status: 500 }

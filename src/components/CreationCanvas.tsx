@@ -2,6 +2,7 @@
 
 import { CanvasState, UserPreferences, Block } from "@/types";
 import { useMemo, lazy, Suspense } from "react";
+import ErrorBoundary from "./ErrorBoundary";
 
 const WorldScene = lazy(() => import("./3d/WorldScene"));
 
@@ -67,23 +68,25 @@ export default function CreationCanvas({
     >
       {/* 3D Scene — fills the entire canvas area */}
       <div className="absolute inset-0">
-        <Suspense
-          fallback={
-            <div className="flex items-center justify-center h-full">
-              <div className="text-white/30 text-sm animate-pulse">
-                Loading 3D world...
+        <ErrorBoundary>
+          <Suspense
+            fallback={
+              <div className="flex items-center justify-center h-full">
+                <div className="text-white/30 text-sm animate-pulse">
+                  Loading 3D world...
+                </div>
               </div>
-            </div>
-          }
-        >
-          <WorldScene
-            canvasState={canvasState}
-            genre={genre}
-            preferences={preferences}
-            lastSelectedBlock={lastSelectedBlock}
-            showConfetti={showConfetti}
-          />
-        </Suspense>
+            }
+          >
+            <WorldScene
+              canvasState={canvasState}
+              genre={genre}
+              preferences={preferences}
+              lastSelectedBlock={lastSelectedBlock}
+              showConfetti={showConfetti}
+            />
+          </Suspense>
+        </ErrorBoundary>
       </div>
 
       {/* UI Overlay — on top of 3D scene */}
@@ -135,7 +138,6 @@ export default function CreationCanvas({
           </div>
         ) : (
           <div className="pointer-events-auto">
-            {/* Compact state tags at the bottom */}
             <div className="bg-black/40 backdrop-blur-md rounded-xl p-3 border border-white/10">
               <div className="flex flex-wrap gap-1.5 items-center">
                 {canvasState.world.map((item, i) => (

@@ -1,8 +1,3 @@
-import { Howl } from "howler";
-
-// Synthesized audio using Web Audio API as a lightweight alternative
-// to shipping audio files — generates sounds procedurally on demand
-
 let audioContext: AudioContext | null = null;
 
 function getAudioContext(): AudioContext {
@@ -50,9 +45,9 @@ export function playClickSound() {
 }
 
 export function playSuccessSound() {
-  playTone(523, 0.15, "sine", 0.12); // C5
-  setTimeout(() => playTone(659, 0.15, "sine", 0.12), 100); // E5
-  setTimeout(() => playTone(784, 0.2, "sine", 0.12), 200); // G5
+  playTone(523, 0.15, "sine", 0.12);
+  setTimeout(() => playTone(659, 0.15, "sine", 0.12), 100);
+  setTimeout(() => playTone(784, 0.2, "sine", 0.12), 200);
 }
 
 export function playSpawnSound() {
@@ -61,13 +56,12 @@ export function playSpawnSound() {
 }
 
 export function playCompletionSound() {
-  const notes = [523, 587, 659, 698, 784, 880, 988, 1047]; // C major scale
+  const notes = [523, 587, 659, 698, 784, 880, 988, 1047];
   notes.forEach((freq, i) => {
     setTimeout(() => playTone(freq, 0.3, "sine", 0.1), i * 100);
   });
 }
 
-// Ambient background drone — very subtle
 let ambientOscillator: OscillatorNode | null = null;
 let ambientGain: GainNode | null = null;
 
@@ -76,13 +70,13 @@ export function startAmbientLoop() {
     const ctx = getAudioContext();
     if (ctx.state === "suspended") ctx.resume();
 
-    if (ambientOscillator) return; // already playing
+    if (ambientOscillator) return;
 
     ambientOscillator = ctx.createOscillator();
     ambientGain = ctx.createGain();
 
     ambientOscillator.type = "sine";
-    ambientOscillator.frequency.setValueAtTime(110, ctx.currentTime); // low A
+    ambientOscillator.frequency.setValueAtTime(110, ctx.currentTime);
     ambientGain.gain.setValueAtTime(0.02, ctx.currentTime);
 
     ambientOscillator.connect(ambientGain);

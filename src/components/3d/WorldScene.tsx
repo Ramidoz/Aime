@@ -2,7 +2,7 @@
 
 import { Suspense, useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls, Environment, Stars } from "@react-three/drei";
+import { OrbitControls, Stars } from "@react-three/drei";
 import { CanvasState, UserPreferences, Block } from "@/types";
 import GroundPlane from "./GroundPlane";
 import SceneObject, { ObjectCategory } from "./SceneObject";
@@ -62,7 +62,6 @@ function buildSceneItems(
     });
   });
 
-  // Mark the last item as new if count increased
   const prevCount = prevCountRef.current;
   if (items.length > prevCount && items.length > 0) {
     items[items.length - 1].isNew = true;
@@ -72,7 +71,6 @@ function buildSceneItems(
   return items;
 }
 
-// Infer style tags from preferences for all objects
 function getGlobalStyleTags(preferences: UserPreferences): string[] {
   return Object.entries(preferences)
     .filter(([, v]) => v >= 0.3)
@@ -101,7 +99,6 @@ function SceneContent({
     { id: number; pos: [number, number, number]; color: string }[]
   >([]);
 
-  // Spawn spark burst when new block is selected
   useEffect(() => {
     if (lastSelectedBlock) {
       const newItem = items.find((i) => i.isNew);
@@ -132,7 +129,6 @@ function SceneContent({
 
   return (
     <>
-      {/* Camera controls */}
       <OrbitControls
         enableZoom={false}
         enablePan={false}
@@ -143,24 +139,20 @@ function SceneContent({
         target={[0, 0.5, 0]}
       />
 
-      {/* Lighting */}
       <ambientLight intensity={0.4} />
       <directionalLight
         position={[5, 8, 5]}
         intensity={0.8}
         castShadow
-        shadow-mapSize-width={512}
-        shadow-mapSize-height={512}
+        shadow-mapSize-width={256}
+        shadow-mapSize-height={256}
       />
       <pointLight position={[-5, 3, -5]} intensity={0.3} color="#8866ff" />
 
-      {/* Environment */}
-      {isSpace && <Stars radius={30} depth={20} count={300} factor={2} fade speed={0.5} />}
+      {isSpace && <Stars radius={30} depth={20} count={200} factor={2} fade speed={0.5} />}
 
-      {/* Ground */}
       <GroundPlane genre={genre} />
 
-      {/* Scene objects from canvas state */}
       {items.map((item, i) => (
         <SceneObject
           key={item.id}
@@ -173,10 +165,8 @@ function SceneContent({
         />
       ))}
 
-      {/* Ambient particles */}
-      <ParticleField genre={genre} count={50} />
+      <ParticleField genre={genre} count={40} />
 
-      {/* Spark bursts on selection */}
       {bursts.map((b) => (
         <SparkBurst
           key={b.id}
@@ -186,7 +176,6 @@ function SceneContent({
         />
       ))}
 
-      {/* Confetti for completion */}
       <ConfettiExplosion active={showConfetti} />
     </>
   );
@@ -196,9 +185,13 @@ export default function WorldScene(props: WorldSceneProps) {
   return (
     <div className="w-full h-full rounded-2xl overflow-hidden">
       <Canvas
-        shadows
         camera={{ position: [6, 4, 6], fov: 50, near: 0.1, far: 100 }}
-        gl={{ antialias: true, alpha: true }}
+        gl={{
+          antialias: true,
+          alpha: true,
+          powerPreference: "high-performance",
+        }}
+        dpr={[1, 1.5]}
         style={{ background: "transparent" }}
       >
         <Suspense fallback={null}>
