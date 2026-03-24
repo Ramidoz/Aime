@@ -60,7 +60,7 @@ export default function Home() {
 
   // ─── Game manager ───
   const {
-    elements, gameState, objective, score, boosted,
+    elements, gameState, objective, score, boosted, damaged,
     gameWon, gameLost, scorePopups, collectEffects,
     stunActive, countdownNumber,
     initGame, checkCollisions, removeCollectEffect,
@@ -366,7 +366,7 @@ export default function Home() {
             sessionSummary="" lastSelectedBlock={null} showConfetti={false}
             playMode={true} gameElements={elements} objective={objective}
             score={score} timer={gameState.timer} combo={gameState.combo}
-            boosted={boosted} stunned={stunActive}
+            boosted={boosted} stunned={stunActive} damaged={damaged}
             gamePhase={gameState.phase} goalReady={gameState.goalReady}
             scorePopups={scorePopups} collectEffects={collectEffects}
             onRemoveCollectEffect={removeCollectEffect}

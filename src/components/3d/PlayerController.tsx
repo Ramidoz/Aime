@@ -1,9 +1,10 @@
 "use client";
 
-import { useRef, useEffect, useCallback } from "react";
+import { useRef, useEffect } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { PlayerState } from "@/types";
+import { inputSystem } from "@/engine/InputSystem";
 
 interface PlayerControllerProps {
   onPositionUpdate: (state: PlayerState) => void;
@@ -17,7 +18,7 @@ const BASE_SPEED = 0.08;
 const BOOST_MULTIPLIER = 2.2;
 const ROTATION_SPEED = 0.045;
 const BOUNDS = 18;
-const MOMENTUM_DECAY = 0.92; // Smooths start/stop
+const MOMENTUM_DECAY = 0.92;
 
 const GENRE_COLORS: Record<string, string> = {
   Racing: "#ff4400",
@@ -37,8 +38,7 @@ export default function PlayerController({
 }: PlayerControllerProps) {
   const groupRef = useRef<THREE.Group>(null);
   const bodyRef = useRef<THREE.Mesh>(null);
-  const keysRef = useRef<Set<string>>(new Set());
-  const velocityRef = useRef({ forward: 0, strafe: 0 });
+  const velocityRef = useRef({ forward: 0 });
   const stateRef = useRef<PlayerState>({
     position: [0, 0.3, 8],
     rotation: 0,
@@ -46,26 +46,14 @@ export default function PlayerController({
     boosted: false,
   });
 
-  const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    keysRef.current.add(e.key.toLowerCase());
-  }, []);
-
-  const handleKeyUp = useCallback((e: KeyboardEvent) => {
-    keysRef.current.delete(e.key.toLowerCase());
-  }, []);
-
+  // Initialize input system
   useEffect(() => {
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("keyup", handleKeyUp);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("keyup", handleKeyUp);
-    };
-  }, [handleKeyDown, handleKeyUp]);
+    inputSystem.init();
+    return () => inputSystem.destroy();
+  }, []);
 
   useFrame((state) => {
     if (!groupRef.current) return;
-    const keys = keysRef.current;
     const s = stateRef.current;
     const v = velocityRef.current;
     const t = state.clock.elapsedTime;
@@ -82,7 +70,7 @@ export default function PlayerController({
       return;
     }
 
-    // Reset emissive after stun
+    // Reset emissive
     if (bodyRef.current) {
       const mat = bodyRef.current.material as THREE.MeshStandardMaterial;
       const color = GENRE_COLORS[genre] || "#ff4400";
@@ -90,17 +78,15 @@ export default function PlayerController({
       mat.emissiveIntensity = boosted ? 0.8 : 0.3;
     }
 
+    // Read from input system
+    const input = inputSystem.getMovement();
     const maxSpeed = boosted ? BASE_SPEED * BOOST_MULTIPLIER : BASE_SPEED;
 
     // Rotation
-    if (keys.has("a") || keys.has("arrowleft")) s.rotation += ROTATION_SPEED;
-    if (keys.has("d") || keys.has("arrowright")) s.rotation -= ROTATION_SPEED;
+    s.rotation += input.turn * ROTATION_SPEED;
 
     // Acceleration with momentum
-    let targetForward = 0;
-    if (keys.has("w") || keys.has("arrowup")) targetForward = -maxSpeed;
-    if (keys.has("s") || keys.has("arrowdown")) targetForward = maxSpeed * 0.5;
-
+    const targetForward = input.forward * maxSpeed;
     v.forward += (targetForward - v.forward) * (1 - MOMENTUM_DECAY);
 
     // Apply velocity
@@ -124,13 +110,10 @@ export default function PlayerController({
     const squash = 1 / Math.sqrt(stretch);
     groupRef.current.scale.set(squash, stretch, squash);
 
-    // Bob when moving
-    if (moving) {
-      groupRef.current.position.y = 0.3 + Math.sin(t * 10) * 0.04;
-    } else {
-      // Idle gentle bounce
-      groupRef.current.position.y = 0.3 + Math.sin(t * 2) * 0.02;
-    }
+    // Bob when moving, idle bounce otherwise
+    groupRef.current.position.y = moving
+      ? 0.3 + Math.sin(t * 10) * 0.04
+      : 0.3 + Math.sin(t * 2) * 0.02;
 
     onPositionUpdate({ ...s, position: [...s.position] as [number, number, number] });
     onCollision(s.position as [number, number, number]);
@@ -140,7 +123,6 @@ export default function PlayerController({
 
   return (
     <group ref={groupRef} position={[0, 0.3, 8]}>
-      {/* Body */}
       <mesh ref={bodyRef} castShadow rotation={[Math.PI, 0, 0]}>
         <coneGeometry args={[0.25, 0.55, 6]} />
         <meshStandardMaterial

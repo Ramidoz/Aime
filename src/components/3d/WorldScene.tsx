@@ -16,6 +16,7 @@ import GameObjects from "./GameObjects";
 import CollectParticles from "./particles/CollectParticles";
 import BoostTrail from "./particles/BoostTrail";
 import GoalConfetti from "./particles/GoalConfetti";
+import GameEffects from "@/engine/Effects";
 
 interface WorldSceneProps {
   canvasState: CanvasState;
@@ -29,6 +30,7 @@ interface WorldSceneProps {
   stunned?: boolean;
   gamePhase?: string;
   goalReady?: boolean;
+  damaged?: boolean;
   collectEffects?: { id: number; position: [number, number, number]; color: string }[];
   onRemoveCollectEffect?: (id: number) => void;
   onPlayerUpdate?: (state: PlayerState) => void;
@@ -74,7 +76,7 @@ function getGlobalStyleTags(preferences: UserPreferences): string[] {
 function SceneContent({
   canvasState, genre, preferences, lastSelectedBlock, showConfetti,
   playMode = false, gameElements = [], boosted = false, stunned = false,
-  gamePhase = "playing", goalReady = false,
+  gamePhase = "playing", goalReady = false, damaged = false,
   collectEffects = [], onRemoveCollectEffect, onPlayerUpdate, onCollision,
 }: WorldSceneProps) {
   const prevCountRef = useRef(0);
@@ -210,6 +212,15 @@ function SceneContent({
         ))}
 
       <ConfettiExplosion active={showConfetti && !playMode} />
+
+      {/* Post-processing effects (play mode only) */}
+      {playMode && (
+        <GameEffects
+          boosted={boosted}
+          damaged={damaged}
+          won={gamePhase === "won"}
+        />
+      )}
     </>
   );
 }

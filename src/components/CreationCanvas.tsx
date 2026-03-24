@@ -25,6 +25,7 @@ interface CreationCanvasProps {
   combo?: number;
   boosted?: boolean;
   stunned?: boolean;
+  damaged?: boolean;
   gamePhase?: string;
   goalReady?: boolean;
   scorePopups?: ScorePopup[];
@@ -69,7 +70,7 @@ export default function CreationCanvas({
   canvasState, genre, narration, preferences, sessionSummary,
   lastSelectedBlock, showConfetti,
   playMode = false, gameElements = [], objective, score = 0,
-  timer = 45, combo = 1, boosted = false, stunned = false,
+  timer = 45, combo = 1, boosted = false, stunned = false, damaged = false,
   gamePhase = "playing", goalReady = false,
   scorePopups = [], collectEffects = [],
   onRemoveCollectEffect, onPlayerUpdate, onCollision,
@@ -90,7 +91,7 @@ export default function CreationCanvas({
               canvasState={canvasState} genre={genre} preferences={preferences}
               lastSelectedBlock={lastSelectedBlock} showConfetti={showConfetti}
               playMode={playMode} gameElements={gameElements}
-              boosted={boosted} stunned={stunned}
+              boosted={boosted} stunned={stunned} damaged={damaged}
               gamePhase={gamePhase} goalReady={goalReady}
               collectEffects={collectEffects}
               onRemoveCollectEffect={onRemoveCollectEffect}

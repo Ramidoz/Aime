@@ -177,15 +177,17 @@ export function useGameManager(canvasState: CanvasState, genre: Genre) {
             playObstacleHit();
             triggerScreenShake(8, 300);
 
-            // Time penalty + stun + combo reset
+            // Time penalty + stun + combo reset + damaged flash
             setGameState((prev) => ({
               ...prev,
               timer: Math.max(0, prev.timer - GAME_CONSTANTS.OBSTACLE_TIME_PENALTY),
               combo: 1,
               stunUntil: now + GAME_CONSTANTS.STUN_DURATION * 1000,
+              damaged: true,
             }));
             setStunActive(true);
             setTimeout(() => setStunActive(false), GAME_CONSTANTS.STUN_DURATION * 1000);
+            setTimeout(() => setGameState((prev) => ({ ...prev, damaged: false })), 300);
 
             setScorePopups((p) => [
               ...p,
@@ -205,10 +207,10 @@ export function useGameManager(canvasState: CanvasState, genre: Genre) {
               { id: now + Math.random(), position: [...el.position] as [number, number, number], color: def.color },
             ]);
 
-            setGameState((prev) => ({ ...prev, boosted: true } as GameState & { boosted: boolean }));
+            setGameState((prev) => ({ ...prev, boosted: true } as GameState));
             if (boostTimerRef.current) clearTimeout(boostTimerRef.current);
             boostTimerRef.current = setTimeout(() => {
-              setGameState((prev) => ({ ...prev, boosted: false } as GameState & { boosted: boolean }));
+              setGameState((prev) => ({ ...prev, boosted: false } as GameState));
             }, 3000);
 
             return { ...el, collected: true };
@@ -294,7 +296,8 @@ export function useGameManager(canvasState: CanvasState, genre: Genre) {
     current: gameState.objectivesCollected,
   };
 
-  const boosted = (gameState as GameState & { boosted?: boolean }).boosted || false;
+  const boosted = gameState.boosted || false;
+  const damaged = gameState.damaged || false;
 
   return {
     elements,
@@ -302,6 +305,7 @@ export function useGameManager(canvasState: CanvasState, genre: Genre) {
     objective,
     score: gameState.score,
     boosted,
+    damaged,
     gameWon: gameState.phase === "won",
     gameLost: gameState.phase === "lost",
     scorePopups,

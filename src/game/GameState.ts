@@ -15,6 +15,8 @@ export interface GameState {
   objectivesCollected: number;
   goalReady: boolean;    // True when all objectives collected
   highScore: number;     // Best score this session
+  boosted: boolean;      // Speed boost active
+  damaged: boolean;      // Recently hit (for screen effects)
 }
 
 export const GAME_CONSTANTS = {
@@ -42,6 +44,8 @@ export function createInitialGameState(objectivesTotal: number): GameState {
     objectivesCollected: 0,
     goalReady: false,
     highScore: 0,
+    boosted: false,
+    damaged: false,
   };
 }
 
