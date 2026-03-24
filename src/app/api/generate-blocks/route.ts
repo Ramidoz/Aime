@@ -6,7 +6,13 @@ import { safetyFilterAgent } from "@/agents/safetyFilter";
 export async function POST(req: NextRequest) {
   try {
     const body: GenerateBlocksRequest = await req.json();
-    const { genre, user_preferences, canvas_state } = body;
+    const {
+      genre,
+      user_preferences,
+      canvas_state,
+      session_summary,
+      recent_blocks,
+    } = body;
 
     if (!genre) {
       return NextResponse.json(
@@ -15,12 +21,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const state = canvas_state || { world: [], characters: [], theme: [], mood: [] };
+    const prefs = user_preferences || {};
+    const summary = session_summary || "";
+    const recent = recent_blocks || [];
+
     // Agent 1: Generate blocks
-    const rawBlocks = await gameDesignerAgent(
-      genre,
-      canvas_state || { world: [], characters: [], theme: [], mood: [] },
-      user_preferences || {}
-    );
+    const rawBlocks = await gameDesignerAgent(genre, state, prefs, summary, recent);
 
     // Agent 2: Safety filter
     const safeBlocks = await safetyFilterAgent(rawBlocks);

@@ -1,4 +1,4 @@
-import { CanvasState, UserPreferences, BlocksResponse } from "@/types";
+import { CanvasState, UserPreferences, Block, BlocksResponse } from "@/types";
 import { buildGameDesignerPrompt } from "@/prompts/gameDesigner";
 import { validateBlocksResponse } from "@/utils/validation";
 import { callClaude } from "@/utils/claude";
@@ -7,18 +7,28 @@ import { generateMockBlocks } from "@/utils/mockData";
 export async function gameDesignerAgent(
   genre: string,
   canvasState: CanvasState,
-  preferences: UserPreferences
+  preferences: UserPreferences,
+  sessionSummary: string,
+  recentBlocks: Block[]
 ): Promise<BlocksResponse> {
-  // Fall back to mock data if no API key
   if (!process.env.ANTHROPIC_API_KEY) {
-    return generateMockBlocks(genre, canvasState);
+    return generateMockBlocks(genre, canvasState, recentBlocks);
   }
 
-  const prompt = buildGameDesignerPrompt(genre, canvasState, preferences);
+  const prompt = buildGameDesignerPrompt(
+    genre,
+    canvasState,
+    preferences,
+    sessionSummary,
+    recentBlocks
+  );
 
-  const response = await callClaude(prompt);
-
-  // Parse and validate
-  const parsed = JSON.parse(response);
-  return validateBlocksResponse(parsed);
+  try {
+    const response = await callClaude(prompt);
+    const parsed = JSON.parse(response);
+    return validateBlocksResponse(parsed);
+  } catch (error) {
+    console.error("gameDesigner LLM failed, falling back to mock:", error);
+    return generateMockBlocks(genre, canvasState, recentBlocks);
+  }
 }

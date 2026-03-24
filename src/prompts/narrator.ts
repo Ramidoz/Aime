@@ -2,7 +2,8 @@ import { CanvasState } from "@/types";
 
 export function buildNarratorPrompt(
   canvasState: CanvasState,
-  selectedBlockLabel: string
+  selectedBlockLabel: string,
+  previousSummary: string
 ): string {
   return `You are a friendly storyteller for children aged 6-12. You narrate an evolving game world in a fun, magical way.
 
@@ -12,9 +13,18 @@ CURRENT WORLD STATE:
 - Theme: ${canvasState.theme.join(", ") || "a blank page"}
 - Mood: ${canvasState.mood.join(", ") || "curious"}
 
+STORY SO FAR:
+${previousSummary || "The adventure is just beginning!"}
+
 The player just added: "${selectedBlockLabel}"
 
-Write a SHORT story scene (2-3 sentences max) describing what just happened in the world. Make it exciting and magical. Use simple words a 6-year-old can understand.
+You must output EXACTLY two lines, nothing else:
+LINE 1: A short story scene (2-3 sentences) describing what just happened. Make it exciting and magical. Use simple words a 6-year-old can understand.
+LINE 2: [SUMMARY] A 1-2 sentence summary of the ENTIRE adventure so far, including this new addition.
 
-IMPORTANT: Output ONLY the story text. No quotes, no labels, no formatting.`;
+Example format:
+A sparkly rocket zoomed into the sky! Stars danced all around it as it flew higher and higher.
+[SUMMARY] An adventurer launched a sparkly rocket into a sky full of dancing stars, beginning an amazing space journey.
+
+IMPORTANT: Output ONLY these two lines. No quotes, no labels on line 1, no markdown.`;
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import {
   Genre,
   Block,
@@ -12,8 +12,12 @@ import {
 import GenrePicker from "@/components/GenrePicker";
 import CreationCanvas from "@/components/CreationCanvas";
 import IdeasWorkshop from "@/components/IdeasWorkshop";
+import AIInsightsPanel from "@/components/AIInsightsPanel";
+
+type AppScreen = "genre-select" | "game" | "genre-switch";
 
 export default function Home() {
+  const [screen, setScreen] = useState<AppScreen>("genre-select");
   const [genre, setGenre] = useState<Genre | null>(null);
   const [canvasState, setCanvasState] = useState<CanvasState>({
     world: [],
@@ -26,42 +30,81 @@ export default function Home() {
   const [narration, setNarration] = useState("");
   const [loading, setLoading] = useState(false);
   const [turn, setTurn] = useState(1);
+  const [pipelineStage, setPipelineStage] = useState("idle");
+  const [showInsights, setShowInsights] = useState(false);
 
-  const fetchInitialBlocks = useCallback(async (selectedGenre: Genre) => {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/generate-blocks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          genre: selectedGenre,
-          user_preferences: {},
-          canvas_state: { world: [], characters: [], theme: [], mood: [] },
-        }),
-      });
-      const data: BlocksResponse = await res.json();
-      setBlocks(data.blocks);
-    } catch (err) {
-      console.error("Failed to fetch initial blocks:", err);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  // Session memory
+  const [sessionSummary, setSessionSummary] = useState("");
+  const [recentBlocks, setRecentBlocks] = useState<Block[]>([]);
+
+  // Prevent double-clicks
+  const processingRef = useRef(false);
+
+  const fetchInitialBlocks = useCallback(
+    async (selectedGenre: Genre, prefs: UserPreferences, summary: string, recent: Block[]) => {
+      setLoading(true);
+      setPipelineStage("designing");
+      try {
+        const res = await fetch("/api/generate-blocks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            genre: selectedGenre,
+            user_preferences: prefs,
+            canvas_state: { world: [], characters: [], theme: [], mood: [] },
+            session_summary: summary,
+            recent_blocks: recent,
+          }),
+        });
+        const data: BlocksResponse = await res.json();
+        if (data.blocks && data.blocks.length === 3) {
+          setBlocks(data.blocks);
+        }
+      } catch (err) {
+        console.error("Failed to fetch initial blocks:", err);
+      } finally {
+        setPipelineStage("idle");
+        setLoading(false);
+      }
+    },
+    []
+  );
 
   const handleGenreSelect = useCallback(
     (selectedGenre: Genre) => {
       setGenre(selectedGenre);
-      fetchInitialBlocks(selectedGenre);
+      setScreen("game");
+      // Reset canvas state for new genre but keep preferences
+      const freshCanvas: CanvasState = { world: [], characters: [], theme: [], mood: [] };
+      setCanvasState(freshCanvas);
+      setNarration("");
+      setBlocks([]);
+      setTurn(1);
+      fetchInitialBlocks(selectedGenre, preferences, sessionSummary, recentBlocks);
     },
-    [fetchInitialBlocks]
+    [fetchInitialBlocks, preferences, sessionSummary, recentBlocks]
   );
+
+  const handleGenreSwitch = useCallback(() => {
+    setScreen("genre-switch");
+  }, []);
 
   const handleBlockSelect = useCallback(
     async (block: Block) => {
-      if (!genre || loading) return;
+      if (!genre || loading || processingRef.current) return;
+      processingRef.current = true;
       setLoading(true);
 
       try {
+        // Animate pipeline stages
+        setPipelineStage("updating-state");
+        await delay(300);
+
+        setPipelineStage("narrating");
+        await delay(200);
+
+        setPipelineStage("designing");
+
         const res = await fetch("/api/interactions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -70,36 +113,61 @@ export default function Home() {
             canvas_state: canvasState,
             user_preferences: preferences,
             genre,
+            session_summary: sessionSummary,
+            recent_blocks: recentBlocks,
           }),
         });
 
+        setPipelineStage("safety-check");
+
         const data: InteractionResponse = await res.json();
-        setCanvasState(data.canvas_state);
-        setPreferences(data.user_preferences);
-        setNarration(data.narration);
-        setBlocks(data.next_blocks);
+
+        if (data.canvas_state) setCanvasState(data.canvas_state);
+        if (data.user_preferences) setPreferences(data.user_preferences);
+        if (data.narration) setNarration(data.narration);
+        if (data.next_blocks && data.next_blocks.length === 3) {
+          setBlocks(data.next_blocks);
+        }
+        if (data.session_summary !== undefined) {
+          setSessionSummary(data.session_summary);
+        }
+        if (data.recent_blocks) {
+          setRecentBlocks(data.recent_blocks);
+        }
         setTurn((t) => t + 1);
       } catch (err) {
         console.error("Failed to process interaction:", err);
       } finally {
+        setPipelineStage("idle");
         setLoading(false);
+        processingRef.current = false;
       }
     },
-    [genre, canvasState, preferences, loading]
+    [genre, canvasState, preferences, loading, sessionSummary, recentBlocks]
   );
 
   const handleReset = useCallback(() => {
+    setScreen("genre-select");
     setGenre(null);
     setCanvasState({ world: [], characters: [], theme: [], mood: [] });
     setPreferences({});
     setBlocks([]);
     setNarration("");
     setTurn(1);
+    setSessionSummary("");
+    setRecentBlocks([]);
+    setShowInsights(false);
   }, []);
 
-  // Genre selection screen
-  if (!genre) {
-    return <GenrePicker onSelect={handleGenreSelect} />;
+  // Genre selection / switch screen
+  if (screen === "genre-select" || screen === "genre-switch") {
+    return (
+      <GenrePicker
+        onSelect={handleGenreSelect}
+        isSwitch={screen === "genre-switch"}
+        currentGenre={genre}
+      />
+    );
   }
 
   // Main game screen - split layout
@@ -115,12 +183,20 @@ export default function Home() {
             {genre}
           </span>
         </div>
-        <button
-          onClick={handleReset}
-          className="text-sm text-gray-400 hover:text-gray-600 font-semibold transition-colors"
-        >
-          Start Over
-        </button>
+        <div className="flex items-center gap-4">
+          <button
+            onClick={handleGenreSwitch}
+            className="text-sm text-purple-400 hover:text-purple-600 font-semibold transition-colors"
+          >
+            Switch Genre
+          </button>
+          <button
+            onClick={handleReset}
+            className="text-sm text-gray-400 hover:text-gray-600 font-semibold transition-colors"
+          >
+            Start Over
+          </button>
+        </div>
       </header>
 
       {/* Split Screen */}
@@ -129,21 +205,41 @@ export default function Home() {
         <div className="flex-1 min-w-0">
           <CreationCanvas
             canvasState={canvasState}
-            genre={genre}
+            genre={genre!}
             narration={narration}
+            preferences={preferences}
+            sessionSummary={sessionSummary}
           />
         </div>
 
-        {/* RIGHT: Ideas Workshop */}
-        <div className="w-[380px] flex-shrink-0">
-          <IdeasWorkshop
-            blocks={blocks}
-            onSelectBlock={handleBlockSelect}
-            loading={loading}
-            turn={turn}
-          />
+        {/* RIGHT: Ideas Workshop + Insights */}
+        <div className="w-[380px] flex-shrink-0 flex flex-col gap-3">
+          {/* AI Insights Panel */}
+          <div className="flex-shrink-0">
+            <AIInsightsPanel
+              preferences={preferences}
+              canvasState={canvasState}
+              visible={showInsights}
+              onToggle={() => setShowInsights((v) => !v)}
+            />
+          </div>
+
+          {/* Ideas Workshop */}
+          <div className="flex-1 min-h-0">
+            <IdeasWorkshop
+              blocks={blocks}
+              onSelectBlock={handleBlockSelect}
+              loading={loading}
+              turn={turn}
+              pipelineStage={pipelineStage}
+            />
+          </div>
         </div>
       </main>
     </div>
   );
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

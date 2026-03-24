@@ -21,6 +21,11 @@ export interface UserPreferences {
   [tag: string]: number;
 }
 
+export interface SessionMemory {
+  session_summary: string;
+  recent_blocks: Block[];
+}
+
 export interface Interaction {
   timestamp: number;
   block: Block;
@@ -32,6 +37,8 @@ export interface GenerateBlocksRequest {
   genre: string;
   user_preferences: UserPreferences;
   canvas_state: CanvasState;
+  session_summary: string;
+  recent_blocks: Block[];
 }
 
 export interface InteractionRequest {
@@ -39,6 +46,8 @@ export interface InteractionRequest {
   canvas_state: CanvasState;
   user_preferences: UserPreferences;
   genre: string;
+  session_summary: string;
+  recent_blocks: Block[];
 }
 
 export interface InteractionResponse {
@@ -46,6 +55,38 @@ export interface InteractionResponse {
   user_preferences: UserPreferences;
   narration: string;
   next_blocks: Block[];
+  session_summary: string;
+  recent_blocks: Block[];
+  pipeline_stages: PipelineStage[];
+}
+
+export type PipelineStage = {
+  name: string;
+  status: "pending" | "running" | "done";
+};
+
+export interface InteractionLog {
+  timestamp: number;
+  turn: number;
+  genre: string;
+  llm_input: {
+    genre: string;
+    canvas_state: CanvasState;
+    user_preferences: UserPreferences;
+    session_summary: string;
+    recent_block_labels: string[];
+  };
+  llm_output_blocks: Block[];
+  selected_block: Block;
+  updated_preferences: UserPreferences;
+  updated_canvas_state: CanvasState;
+  narration: string;
+}
+
+export interface AIInsights {
+  top_preferences: [string, number][];
+  inferred_theme: string;
+  suggestion_reason: string;
 }
 
 export type Genre = "Racing" | "Pets" | "Space" | "Fantasy" | "Ocean" | "Dinosaurs";

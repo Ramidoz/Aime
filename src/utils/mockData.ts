@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
-import { BlocksResponse, CanvasState } from "@/types";
+import { Block, BlocksResponse, CanvasState } from "@/types";
 
 const GENRE_BLOCKS: Record<string, Array<{ label: string; desc: string; snippet: string; tags: string[] }>> = {
   Racing: [
@@ -54,18 +54,23 @@ const GENRE_BLOCKS: Record<string, Array<{ label: string; desc: string; snippet:
 
 export function generateMockBlocks(
   genre: string,
-  canvasState: CanvasState
+  canvasState: CanvasState,
+  recentBlocks: Block[] = []
 ): BlocksResponse {
   const pool = GENRE_BLOCKS[genre] || GENRE_BLOCKS["Space"];
 
-  // Avoid selecting blocks that are already in the world
+  // Avoid selecting blocks that are already in the world or were recently chosen
   const existingItems = [
     ...canvasState.world,
     ...canvasState.characters,
   ].map((s) => s.toLowerCase());
 
+  const recentLabels = recentBlocks.map((b) => b.visual_label.toLowerCase());
+
   const available = pool.filter(
-    (b) => !existingItems.some((item) => b.label.toLowerCase().includes(item))
+    (b) =>
+      !existingItems.some((item) => b.label.toLowerCase().includes(item)) &&
+      !recentLabels.includes(b.label.toLowerCase())
   );
 
   // Pick 3 random blocks from available (or fall back to full pool)
